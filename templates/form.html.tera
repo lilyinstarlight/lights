@@ -1,0 +1,9 @@
+{% extends "base" %}
+
+{% block title %}Color Changer{% endblock title %}
+
+{% block content %}
+<form>
+	<p>TODO</p>
+</form>
+{% endblock content %}
