@@ -101,9 +101,9 @@ fn main() {
 
     let mut output = Output {
         frequency: 60.0,
-        red_pin: gpio.get(16).unwrap().into_output(),
-        green_pin: gpio.get(20).unwrap().into_output(),
-        blue_pin: gpio.get(21).unwrap().into_output(),
+        red_pin: gpio.get(17).unwrap().into_output(),
+        green_pin: gpio.get(27).unwrap().into_output(),
+        blue_pin: gpio.get(22).unwrap().into_output(),
     };
 
     set_output(&mut output, initial).unwrap();
