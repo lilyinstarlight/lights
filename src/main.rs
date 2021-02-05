@@ -78,6 +78,14 @@ fn bad_request() -> Json<Error> {
     })
 }
 
+#[catch(422)]
+fn unprocessable_entity() -> Json<Error> {
+    Json(Error {
+        status: String::from("error"),
+        message: String::from("Malformed request"),
+    })
+}
+
 #[catch(404)]
 fn not_found() -> Json<Error> {
     Json(Error {
@@ -110,7 +118,7 @@ fn main() {
 
     rocket::ignite()
         .mount("/", routes![get_color, set_color, form, form_submit])
-        .register(catchers![bad_request, not_found])
+        .register(catchers![bad_request, unprocessable_entity, not_found])
         .manage(Mutex::new(initial.clone()))
         .manage(Mutex::new(output))
         .attach(Template::fairing())
