@@ -13,6 +13,9 @@ use rocket_contrib::templates::Template;
 
 use serde::{Serialize, Deserialize};
 
+use rppal::gpio::Gpio;
+use rppal::gpio::OutputPin;
+
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct Color {
@@ -29,18 +32,30 @@ struct Error {
 
 type CurrentColor = Mutex<Color>;
 
+struct Output {
+    frequency: f64,
+    red_pin: OutputPin,
+    green_pin: OutputPin,
+    blue_pin: OutputPin,
+}
+
+type CurrentOutput = Mutex<Output>;
+
 #[get("/color")]
 fn get_color(current: State<CurrentColor>) -> Json<Color> {
     Json(*current.lock().unwrap())
 }
 
 #[put("/color", data = "<color>")]
-fn set_color(color: Json<Color>, current: State<CurrentColor>) -> Status {
+fn set_color(color: Json<Color>, current: State<CurrentColor>, output: State<CurrentOutput>) -> Status {
     let mut current_color = current.lock().unwrap();
+    let mut current_output = output.lock().unwrap();
 
     current_color.red = color.red;
     current_color.green = color.green;
     current_color.blue = color.blue;
+
+    set_output(&mut current_output, *current_color).unwrap();
 
     Status::NoContent
 }
@@ -71,11 +86,33 @@ fn not_found() -> Json<Error> {
     })
 }
 
+fn set_output(output: &mut Output, color: Color) -> rppal::gpio::Result<()> {
+    output.red_pin.set_pwm_frequency(output.frequency, color.red as f64 / 255.0)?;
+    output.green_pin.set_pwm_frequency(output.frequency, color.green as f64 / 255.0)?;
+    output.blue_pin.set_pwm_frequency(output.frequency, color.blue as f64 / 255.0)?;
+
+    Ok(())
+}
+
 fn main() {
+    let initial = Color { red: 242, green: 155, blue: 212 };
+
+    let gpio = Gpio::new().unwrap();
+
+    let mut output = Output {
+        frequency: 60.0,
+        red_pin: gpio.get(16).unwrap().into_output(),
+        green_pin: gpio.get(20).unwrap().into_output(),
+        blue_pin: gpio.get(21).unwrap().into_output(),
+    };
+
+    set_output(&mut output, initial).unwrap();
+
     rocket::ignite()
-        .mount("/", routes![get_color, set_color, form])
+        .mount("/", routes![get_color, set_color, form, form_submit])
         .register(catchers![bad_request, not_found])
-        .manage(Mutex::new(Color { red: 242, green: 155, blue: 212, }))
+        .manage(Mutex::new(initial.clone()))
+        .manage(Mutex::new(output))
         .attach(Template::fairing())
         .launch();
 }
