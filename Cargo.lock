@@ -309,6 +309,7 @@ dependencies = [
  "rosc",
  "rppal",
  "serde",
+ "yansi",
 ]
 
 [[package]]

@@ -22,6 +22,8 @@ use rppal::gpio::{Gpio, OutputPin};
 
 use serde::{Deserialize, Serialize};
 
+use yansi::Paint;
+
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct Color {
@@ -113,6 +115,8 @@ fn osc_server(output: CurrentOutput) {
 
     let socket = UdpSocket::bind((address, port)).unwrap();
 
+    println!("{}{} {}", Paint::masked("🎛  "), Paint::default("OSC server started on").bold(), Paint::default(socket.local_addr().unwrap()).bold().underline());
+
     let mut buffer = [0u8; rosc::decoder::MTU];
 
     loop {
@@ -124,9 +128,19 @@ fn osc_server(output: CurrentOutput) {
                             OscPacket::Message(msg) => {
                                 match msg.addr.as_ref() {
                                     "/color" => {
+                                        let mut current_output = output.lock().unwrap();
+
                                         match &msg.args[..] {
+                                            [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
+                                                set_output(&mut current_output, Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }).unwrap();
+                                            },
+                                            [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
+                                                set_output(&mut current_output, Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }).unwrap();
+                                            },
+                                            [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
+                                                set_output(&mut current_output, Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }).unwrap();
+                                            },
                                             [OscType::Color(color)] => {
-                                                let mut current_output = output.lock().unwrap();
                                                 set_output(&mut current_output, Color { red: color.red, green: color.green, blue: color.blue }).unwrap();
                                             },
                                             _ => {
