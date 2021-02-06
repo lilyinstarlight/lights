@@ -3,6 +3,7 @@
 #[macro_use] extern crate rocket;
 
 use std::collections::HashMap;
+use std::net::UdpSocket;
 use std::sync::Mutex;
 
 use rocket::State;
@@ -11,10 +12,11 @@ use rocket::http::Status;
 use rocket_contrib::json::Json;
 use rocket_contrib::templates::Template;
 
-use serde::{Serialize, Deserialize};
+use rosc::{OscPacket, OscType};
 
-use rppal::gpio::Gpio;
-use rppal::gpio::OutputPin;
+use rppal::gpio::{Gpio, OutputPin};
+
+use serde::{Serialize, Deserialize};
 
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -94,6 +96,52 @@ fn not_found() -> Json<Error> {
     })
 }
 
+fn osc_server(output: &CurrentOutput) {
+    let socket = UdpSocket::bind("127.0.0.1:1337");
+
+    let mut buffer = [0u8; rosc::decoder::MTU];
+
+    loop {
+        match socket.recv_from(&mut buffer) {
+            Ok((size, addr)) => {
+                match rosc::decoder::decode(&buffer[..size]) {
+                    Ok(packet) => {
+                        match packet {
+                            OscPacket::Message(msg) => {
+                                match msg.addr.as_ref() {
+                                    "/color" => {
+                                        match msg.args[..] {
+                                            [OscType::Color(color)] => {
+                                                let mut current_output = output.lock().unwrap();
+                                                set_output(&mut current_output, Color { red: color.red, green: color.green, blue: color.blue }).unwrap();
+                                            },
+                                            _ => {
+                                                eprintln!("Unexpected OSC /color command: {:?}", msg.args);
+                                            }
+                                        }
+                                    },
+                                    _ => {
+                                        eprintln!("Unexpected OSC Message: {}: {:?}", msg.addr, msg.args);
+                                    }
+                                }
+                            },
+                            OscPacket::Bundle(bundle) => {
+                                eprintln!("Unexpected OSC Bundle: {:?}", bundle);
+                            },
+                        }
+                    },
+                    Err(err) {
+                        eprintln!("Error decoding OSC packet: {}", err);
+                    }
+                }
+            },
+            Err(err) => {
+                eprintln!("Error receiving from socket: {}", err);
+            }
+        }
+    }
+}
+
 fn set_output(output: &mut Output, color: Color) -> rppal::gpio::Result<()> {
     output.red_pin.set_pwm_frequency(output.frequency, color.red as f64 / 255.0)?;
     output.green_pin.set_pwm_frequency(output.frequency, color.green as f64 / 255.0)?;
@@ -122,5 +170,10 @@ fn main() {
         .manage(Mutex::new(initial.clone()))
         .manage(Mutex::new(output))
         .attach(Template::fairing())
+        .attach(AdHoc::on_launch("OSC Server", |rocket| {
+            thread::spawn(|| {
+                osc_server(rocket.state::<CurrentOutput>().unwrap());
+            });
+        }))
         .launch();
 }

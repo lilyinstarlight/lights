@@ -306,6 +306,7 @@ version = "0.1.0"
 dependencies = [
  "rocket",
  "rocket_contrib",
+ "rosc",
  "rppal",
  "serde",
 ]
@@ -985,6 +986,15 @@ dependencies = [
  "state",
  "time",
  "unicode-xid 0.1.0",
+]
+
+[[package]]
+name = "rosc"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab14890b28b4c78d4c0fda2482bdd32de58b7288ceda713b4deafa7b15852bf0"
+dependencies = [
+ "byteorder",
 ]
 
 [[package]]
