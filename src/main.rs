@@ -2,11 +2,15 @@
 
 #[macro_use] extern crate rocket;
 
+use std::env;
+use std::thread;
+
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rocket::State;
+use rocket::fairing::AdHoc;
 use rocket::http::Status;
 
 use rocket_contrib::json::Json;
@@ -16,7 +20,7 @@ use rosc::{OscPacket, OscType};
 
 use rppal::gpio::{Gpio, OutputPin};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -41,7 +45,7 @@ struct Output {
     blue_pin: OutputPin,
 }
 
-type CurrentOutput = Mutex<Output>;
+type CurrentOutput = Arc<Mutex<Output>>;
 
 #[get("/color")]
 fn get_color(current: State<CurrentColor>) -> Json<Color> {
@@ -96,21 +100,31 @@ fn not_found() -> Json<Error> {
     })
 }
 
-fn osc_server(output: &CurrentOutput) {
-    let socket = UdpSocket::bind("127.0.0.1:1337");
+fn osc_server(output: CurrentOutput) {
+    let address = match env::var("OSC_ADDRESS") {
+        Ok(val) => val,
+        Err(_err) => String::from("127.0.0.1"),
+    };
+
+    let port: u16 = match env::var("OSC_PORT") {
+        Ok(val) => val.parse().unwrap(),
+        Err(_err) => 1337,
+    };
+
+    let socket = UdpSocket::bind((address, port)).unwrap();
 
     let mut buffer = [0u8; rosc::decoder::MTU];
 
     loop {
         match socket.recv_from(&mut buffer) {
-            Ok((size, addr)) => {
+            Ok((size, _addr)) => {
                 match rosc::decoder::decode(&buffer[..size]) {
                     Ok(packet) => {
                         match packet {
                             OscPacket::Message(msg) => {
                                 match msg.addr.as_ref() {
                                     "/color" => {
-                                        match msg.args[..] {
+                                        match &msg.args[..] {
                                             [OscType::Color(color)] => {
                                                 let mut current_output = output.lock().unwrap();
                                                 set_output(&mut current_output, Color { red: color.red, green: color.green, blue: color.blue }).unwrap();
@@ -130,8 +144,8 @@ fn osc_server(output: &CurrentOutput) {
                             },
                         }
                     },
-                    Err(err) {
-                        eprintln!("Error decoding OSC packet: {}", err);
+                    Err(err) => {
+                        eprintln!("Error decoding OSC packet: {:?}", err);
                     }
                 }
             },
@@ -164,15 +178,19 @@ fn main() {
 
     set_output(&mut output, initial).unwrap();
 
+    let current_output = Arc::new(Mutex::new(output));
+    let rocket_output = Arc::clone(&current_output);
+    let osc_output = Arc::clone(&current_output);
+
     rocket::ignite()
         .mount("/", routes![get_color, set_color, form, form_submit])
         .register(catchers![bad_request, unprocessable_entity, not_found])
         .manage(Mutex::new(initial.clone()))
-        .manage(Mutex::new(output))
+        .manage(rocket_output)
         .attach(Template::fairing())
-        .attach(AdHoc::on_launch("OSC Server", |rocket| {
-            thread::spawn(|| {
-                osc_server(rocket.state::<CurrentOutput>().unwrap());
+        .attach(AdHoc::on_launch("OSC Server", |_rocket| {
+            thread::spawn(move || {
+                osc_server(osc_output);
             });
         }))
         .launch();
