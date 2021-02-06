@@ -2,8 +2,46 @@
 
 {% block title %}Color Changer{% endblock title %}
 
+{% block head %}
+{{ super() }}
+<link href="static/vendor/color-picker.min.css" rel="stylesheet"/>
+<style>
+	.color-picker\:a {
+		display: none;
+	}
+
+	.color-picker.is-static {
+		display: inline-block;
+		position: static;
+		left: 0 !important;
+		top: 0 !important;
+		box-shadow: none;
+	}
+</style>
+{% endblock head %}
+
 {% block content %}
-<form>
-	<p>TODO</p>
+<form method="post">
+	<p id="color_picker"></p>
+	<input id="color" name="color" type="color" value="{{ color }}"/>
+	<p></p>
+	<button type="submit">Set</button>
 </form>
+<script src="static/vendor/color-picker.min.js"></script>
+<script>
+	function addPicker(element) {
+		const picker = new CP(element);
+		element.addEventListener('click', ev => ev.preventDefault());
+
+		picker.on('blur', () => {});
+		picker.on('focus', () => {});
+		picker.on('change', function (red, green, blue) {
+			this.source.value = this.color(red, green, blue, 1);
+		});
+		picker.self.classList.add('is-static');
+		picker.enter(document.getElementById(element.name + '_picker'));
+	}
+
+	document.querySelectorAll('input[type=color]').forEach(addPicker);
+</script>
 {% endblock content %}
