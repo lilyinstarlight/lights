@@ -191,7 +191,7 @@ fn not_found() -> Json<Error> {
 fn osc_server(color: CurrentColor, output: CurrentOutput) {
     let address = match env::var("OSC_ADDRESS") {
         Ok(val) => val,
-        Err(_err) => String::from("127.0.0.1"),
+        Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" }),
     };
 
     let port: u16 = match env::var("OSC_PORT") {
