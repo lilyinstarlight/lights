@@ -38,7 +38,7 @@ struct Error {
     message: String,
 }
 
-type CurrentColor = Mutex<Color>;
+type CurrentColor = Arc<Mutex<Color>>;
 
 struct Output {
     frequency: f64,
@@ -102,7 +102,7 @@ fn not_found() -> Json<Error> {
     })
 }
 
-fn osc_server(output: CurrentOutput) {
+fn osc_server(color: CurrentColor, output: CurrentOutput) {
     let address = match env::var("OSC_ADDRESS") {
         Ok(val) => val,
         Err(_err) => String::from("127.0.0.1"),
@@ -128,25 +128,36 @@ fn osc_server(output: CurrentOutput) {
                             OscPacket::Message(msg) => {
                                 match msg.addr.as_ref() {
                                     "/color" => {
+                                        let mut current_color = color.lock().unwrap();
                                         let mut current_output = output.lock().unwrap();
 
                                         match &msg.args[..] {
                                             [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
-                                                set_output(&mut current_output, Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }).unwrap();
+                                                current_color.red = *red as u8;
+                                                current_color.green = *green as u8;
+                                                current_color.blue = *blue as u8;
                                             },
                                             [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
-                                                set_output(&mut current_output, Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }).unwrap();
+                                                current_color.red = *red as u8;
+                                                current_color.green = *green as u8;
+                                                current_color.blue = *blue as u8;
                                             },
                                             [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
-                                                set_output(&mut current_output, Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }).unwrap();
+                                                current_color.red = *red as u8;
+                                                current_color.green = *green as u8;
+                                                current_color.blue = *blue as u8;
                                             },
                                             [OscType::Color(color)] => {
-                                                set_output(&mut current_output, Color { red: color.red, green: color.green, blue: color.blue }).unwrap();
+                                                current_color.red = color.red;
+                                                current_color.green = color.green;
+                                                current_color.blue = color.blue;
                                             },
                                             _ => {
                                                 eprintln!("Unexpected OSC /color command: {:?}", msg.args);
                                             }
                                         }
+
+                                        set_output(&mut current_output, *current_color).unwrap();
                                     },
                                     _ => {
                                         eprintln!("Unexpected OSC Message: {}: {:?}", msg.addr, msg.args);
@@ -192,6 +203,10 @@ fn main() {
 
     set_output(&mut output, initial).unwrap();
 
+    let current_color = Arc::new(Mutex::new(initial.clone()));
+    let rocket_color = Arc::clone(&current_color);
+    let osc_color = Arc::clone(&current_color);
+
     let current_output = Arc::new(Mutex::new(output));
     let rocket_output = Arc::clone(&current_output);
     let osc_output = Arc::clone(&current_output);
@@ -199,12 +214,12 @@ fn main() {
     rocket::ignite()
         .mount("/", routes![get_color, set_color, form, form_submit])
         .register(catchers![bad_request, unprocessable_entity, not_found])
-        .manage(Mutex::new(initial.clone()))
+        .manage(rocket_color)
         .manage(rocket_output)
         .attach(Template::fairing())
         .attach(AdHoc::on_launch("OSC Server", |_rocket| {
             thread::spawn(move || {
-                osc_server(osc_output);
+                osc_server(osc_color, osc_output);
             });
         }))
         .launch();
