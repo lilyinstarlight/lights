@@ -12,6 +12,7 @@ use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rocket::State;
 use rocket::fairing::AdHoc;
@@ -31,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use yansi::Paint;
 
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct Color {
     red: u8,
     green: u8,
@@ -91,43 +92,123 @@ impl fmt::Display for Color {
     }
 }
 
+struct Output {
+    frequency: f64,
+
+    red: OutputPin,
+    green: OutputPin,
+    blue: OutputPin,
+}
+
+impl Output {
+    fn set(&mut self, color: Color) -> rppal::gpio::Result<()> {
+        self.red.set_pwm_frequency(self.frequency, color.red as f64 / 255.0)?;
+        self.green.set_pwm_frequency(self.frequency, color.green as f64 / 255.0)?;
+        self.blue.set_pwm_frequency(self.frequency, color.blue as f64 / 255.0)?;
+
+        Ok(())
+    }
+}
+
+struct Lights {
+    output: Output,
+    anim: Vec<(Color, u32)>,
+
+    frame: usize,
+    counter: u32,
+    last: Color,
+}
+
+impl Lights {
+    fn new(output: Output, mut anim: Vec<(Color, u32)>) -> Lights {
+        if anim.len() < 1 {
+            anim = vec![(Color { red: 0, green: 0, blue: 0 }, 0)];
+        }
+
+        let mut lights = Lights {
+            output,
+            anim,
+
+            frame: 0,
+            counter: 0,
+            last: Color { red: 0, green: 0, blue: 0 },
+        };
+
+        lights.output.set(lights.anim[0].0).expect("Lights output failure");
+        lights.last = lights.anim[0].0;
+
+        lights
+    }
+
+    fn get(&self) -> Color {
+        self.anim[self.frame].0
+    }
+
+    fn set(&mut self, color: Color) {
+        self.anim = vec![(color, 0)];
+    }
+
+    fn get_anim(&self) -> &[(Color, u32)] {
+        &self.anim
+    }
+
+    fn set_anim(&mut self, anim: &[(Color, u32)]) {
+        if anim.len() < 1 {
+            self.anim = vec![(Color { red: 0, green: 0, blue: 0 }, 0)];
+        }
+        else {
+            self.anim = anim.to_vec();
+        }
+    }
+
+    fn tick(&mut self, delta: u32) {
+        if self.frame >= self.anim.len() {
+            self.frame = 0;
+            self.counter = 0;
+        }
+
+        if self.anim.len() > 1 {
+            self.counter += delta;
+
+            if self.counter >= self.anim[self.frame].1 {
+                self.frame = (self.frame + 1) % self.anim.len();
+                self.counter = 0;
+            }
+        }
+        else {
+            self.counter = 0;
+        }
+
+        let color = self.anim[self.frame].0;
+
+        if color != self.last {
+            self.output.set(color).expect("Lights output failure");
+            self.last = color;
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
-struct Error {
+struct APIError {
     status: String,
     message: String,
 }
-
-type CurrentColor = Arc<Mutex<Color>>;
-
-struct Output {
-    frequency: f64,
-    red_pin: OutputPin,
-    green_pin: OutputPin,
-    blue_pin: OutputPin,
-}
-
-type CurrentOutput = Arc<Mutex<Output>>;
 
 #[derive(FromForm)]
 struct ColorForm {
     color: Color,
 }
 
+type SharedLights = Arc<Mutex<Lights>>;
+
 #[get("/color")]
-fn get_color(current: State<CurrentColor>) -> Json<Color> {
-    Json(*current.lock().unwrap())
+fn get_color(lights: State<SharedLights>) -> Json<Color> {
+    Json(lights.lock().unwrap().get())
 }
 
 #[put("/color", data = "<color>")]
-fn set_color(color: Json<Color>, current: State<CurrentColor>, output: State<CurrentOutput>) -> Status {
-    let mut current_color = current.lock().unwrap();
-    let mut current_output = output.lock().unwrap();
-
-    current_color.red = color.red;
-    current_color.green = color.green;
-    current_color.blue = color.blue;
-
-    set_output(&mut current_output, *current_color).unwrap();
+fn set_color(color: Json<Color>, lights: State<SharedLights>) -> Status {
+    lights.lock().unwrap().set(*color);
 
     Status::NoContent
 }
@@ -138,57 +219,46 @@ fn files(file: PathBuf) -> Option<NamedFile> {
 }
 
 #[get("/")]
-fn form(current: State<CurrentColor>) -> Template {
-    let current_color = current.lock().unwrap();
-
+fn form(lights: State<SharedLights>) -> Template {
     let context = [
-        (String::from("color"), current_color.to_string()),
+        (String::from("color"), lights.lock().unwrap().get().to_string()),
     ];
 
     Template::render("form", context.iter().cloned().collect::<HashMap<String, String>>())
 }
 
 #[post("/", data = "<color_form>")]
-fn form_submit(color_form: Form<ColorForm>, current: State<CurrentColor>, output: State<CurrentOutput>) -> Template {
-    {
-        let mut current_color = current.lock().unwrap();
-        let mut current_output = output.lock().unwrap();
+fn form_submit(color_form: Form<ColorForm>, lights: State<SharedLights>) -> Template {
+    lights.lock().unwrap().set(color_form.color);
 
-        current_color.red = color_form.color.red;
-        current_color.green = color_form.color.green;
-        current_color.blue = color_form.color.blue;
-
-        set_output(&mut current_output, *current_color).unwrap();
-    }
-
-    form(current)
+    form(lights)
 }
 
 #[catch(400)]
-fn bad_request() -> Json<Error> {
-    Json(Error {
+fn bad_request() -> Json<APIError> {
+    Json(APIError {
         status: String::from("error"),
         message: String::from("Malformed request"),
     })
 }
 
 #[catch(422)]
-fn unprocessable_entity() -> Json<Error> {
-    Json(Error {
+fn unprocessable_entity() -> Json<APIError> {
+    Json(APIError {
         status: String::from("error"),
         message: String::from("Malformed request"),
     })
 }
 
 #[catch(404)]
-fn not_found() -> Json<Error> {
-    Json(Error {
+fn not_found() -> Json<APIError> {
+    Json(APIError {
         status: String::from("error"),
         message: String::from("Resource not found"),
     })
 }
 
-fn osc_server(color: CurrentColor, output: CurrentOutput) {
+fn osc_server(lights: SharedLights) {
     let address = match env::var("OSC_ADDRESS") {
         Ok(val) => val,
         Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" }),
@@ -214,36 +284,23 @@ fn osc_server(color: CurrentColor, output: CurrentOutput) {
                             OscPacket::Message(msg) => {
                                 match msg.addr.as_ref() {
                                     "/color" => {
-                                        let mut current_color = color.lock().unwrap();
-                                        let mut current_output = output.lock().unwrap();
-
                                         match &msg.args[..] {
                                             [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
-                                                current_color.red = *red as u8;
-                                                current_color.green = *green as u8;
-                                                current_color.blue = *blue as u8;
+                                                lights.lock().unwrap().set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
                                             },
                                             [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
-                                                current_color.red = *red as u8;
-                                                current_color.green = *green as u8;
-                                                current_color.blue = *blue as u8;
+                                                lights.lock().unwrap().set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
                                             },
                                             [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
-                                                current_color.red = *red as u8;
-                                                current_color.green = *green as u8;
-                                                current_color.blue = *blue as u8;
+                                                lights.lock().unwrap().set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
                                             },
                                             [OscType::Color(color)] => {
-                                                current_color.red = color.red;
-                                                current_color.green = color.green;
-                                                current_color.blue = color.blue;
+                                                lights.lock().unwrap().set(Color { red: color.red, green: color.green, blue: color.blue });
                                             },
                                             _ => {
                                                 eprintln!("Unexpected OSC /color command: {:?}", msg.args);
                                             }
                                         }
-
-                                        set_output(&mut current_output, *current_color).unwrap();
                                     },
                                     _ => {
                                         eprintln!("Unexpected OSC Message: {}: {:?}", msg.addr, msg.args);
@@ -267,45 +324,50 @@ fn osc_server(color: CurrentColor, output: CurrentOutput) {
     }
 }
 
-fn set_output(output: &mut Output, color: Color) -> rppal::gpio::Result<()> {
-    output.red_pin.set_pwm_frequency(output.frequency, color.red as f64 / 255.0)?;
-    output.green_pin.set_pwm_frequency(output.frequency, color.green as f64 / 255.0)?;
-    output.blue_pin.set_pwm_frequency(output.frequency, color.blue as f64 / 255.0)?;
+fn anim_output(lights: SharedLights, chronon: Duration) {
+    println!("{}{}", Paint::masked("🔦 "), Paint::default("Light animation output started").bold());
 
-    Ok(())
+    loop {
+        lights.lock().unwrap().tick(chronon.as_millis() as u32);
+        thread::sleep(chronon);
+    }
 }
 
 fn main() {
     let initial = Color { red: 242, green: 155, blue: 212 };
 
+    let chronon = Duration::from_millis(50);
+
     let gpio = Gpio::new().unwrap();
 
-    let mut output = Output {
-        frequency: 60.0,
-        red_pin: gpio.get(17).unwrap().into_output(),
-        green_pin: gpio.get(27).unwrap().into_output(),
-        blue_pin: gpio.get(22).unwrap().into_output(),
-    };
+    let lights = Arc::new(Mutex::new(Lights::new(
+        Output {
+            frequency: 60.0,
 
-    set_output(&mut output, initial).unwrap();
+            red: gpio.get(17).unwrap().into_output(),
+            green: gpio.get(27).unwrap().into_output(),
+            blue: gpio.get(22).unwrap().into_output(),
+        },
+        vec![(initial, 0)],
+    )));
 
-    let current_color = Arc::new(Mutex::new(initial.clone()));
-    let rocket_color = Arc::clone(&current_color);
-    let osc_color = Arc::clone(&current_color);
-
-    let current_output = Arc::new(Mutex::new(output));
-    let rocket_output = Arc::clone(&current_output);
-    let osc_output = Arc::clone(&current_output);
+    let lights_rocket = Arc::clone(&lights);
+    let lights_osc = Arc::clone(&lights);
+    let lights_output = Arc::clone(&lights);
 
     rocket::ignite()
         .mount("/", routes![get_color, set_color, files, form, form_submit])
         .register(catchers![bad_request, unprocessable_entity, not_found])
-        .manage(rocket_color)
-        .manage(rocket_output)
+        .manage(lights_rocket)
         .attach(Template::fairing())
-        .attach(AdHoc::on_launch("OSC Server", |_rocket| {
+        .attach(AdHoc::on_launch("OSC Server", move |_rocket| {
             thread::spawn(move || {
-                osc_server(osc_color, osc_output);
+                osc_server(lights_osc);
+            });
+        }))
+        .attach(AdHoc::on_launch("Light Animation Output", move |_rocket| {
+            thread::spawn(move || {
+                anim_output(lights_output, chronon);
             });
         }))
         .launch();
