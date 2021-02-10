@@ -12,7 +12,7 @@ use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rocket::State;
 use rocket::fairing::AdHoc;
@@ -92,6 +92,19 @@ impl fmt::Display for Color {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct Frame {
+    color: Color,
+    duration: Duration,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+enum Pattern {
+    Off,
+    Solid(Color),
+    Custom(Vec<Frame>),
+}
+
 struct Output {
     frequency: f64,
 
@@ -112,78 +125,95 @@ impl Output {
 
 struct Lights {
     output: Output,
-    anim: Vec<(Color, u32)>,
+    pattern: Pattern,
 
     frame: usize,
-    counter: u32,
+    instant: Instant,
+
     last: Color,
 }
 
 impl Lights {
-    fn new(output: Output, mut anim: Vec<(Color, u32)>) -> Lights {
-        if anim.len() < 1 {
-            anim = vec![(Color { red: 0, green: 0, blue: 0 }, 0)];
-        }
-
+    fn new(output: Output, pattern: Pattern) -> Lights {
         let mut lights = Lights {
             output,
-            anim,
+            pattern,
 
             frame: 0,
-            counter: 0,
+            instant: Instant::now(),
             last: Color { red: 0, green: 0, blue: 0 },
         };
 
-        lights.output.set(lights.anim[0].0).expect("Lights output failure");
-        lights.last = lights.anim[0].0;
+        lights.output.set(Color { red: 0, green: 0, blue: 0 }).expect("Lights output failure");
 
         lights
     }
 
     fn get(&self) -> Color {
-        self.anim[self.frame].0
+        match &self.pattern {
+            Pattern::Off => {
+                Color { red: 0, green: 0, blue: 0 }
+            },
+            Pattern::Solid(color) => {
+                *color
+            },
+            Pattern::Custom(frames) => {
+                if frames.len() > 0 {
+                    frames[self.frame].color
+                }
+                else {
+                    Color { red: 0, green: 0, blue: 0 }
+                }
+            },
+        }
     }
 
     fn set(&mut self, color: Color) {
-        self.anim = vec![(color, 0)];
+        self.pattern = Pattern::Solid(color);
     }
 
-    fn get_anim(&self) -> &[(Color, u32)] {
-        &self.anim
+    fn get_pattern(&self) -> &Pattern {
+        &self.pattern
     }
 
-    fn set_anim(&mut self, anim: &[(Color, u32)]) {
-        if anim.len() < 1 {
-            self.anim = vec![(Color { red: 0, green: 0, blue: 0 }, 0)];
-        }
-        else {
-            self.anim = anim.to_vec();
-        }
+    fn set_pattern(&mut self, pattern: &Pattern) {
+        self.pattern = pattern.clone();
     }
 
-    fn tick(&mut self, delta: u32) {
-        if self.frame >= self.anim.len() {
-            self.frame = 0;
-            self.counter = 0;
-        }
+    fn tick(&mut self) {
+        let next = match &self.pattern {
+            Pattern::Off => {
+                Color { red: 0, green: 0, blue: 0 }
+            },
+            Pattern::Solid(color) => {
+                *color
+            },
+            Pattern::Custom(frames) => {
+                if frames.len() > 0 {
+                    if self.frame >= frames.len() {
+                        self.instant = Instant::now();
+                        self.frame = 0;
+                    }
 
-        if self.anim.len() > 1 {
-            self.counter += delta;
+                    if self.instant.elapsed() >= frames[self.frame].duration {
+                        self.instant = self.instant.checked_add(frames[self.frame].duration).unwrap();
+                        self.frame = (self.frame + 1) % frames.len();
+                    }
 
-            if self.counter >= self.anim[self.frame].1 {
-                self.frame = (self.frame + 1) % self.anim.len();
-                self.counter = 0;
-            }
-        }
-        else {
-            self.counter = 0;
-        }
+                    frames[self.frame].color
+                }
+                else {
+                    self.instant = Instant::now();
+                    self.frame = 0;
 
-        let color = self.anim[self.frame].0;
+                    Color { red: 0, green: 0, blue: 0 }
+                }
+            },
+        };
 
-        if color != self.last {
-            self.output.set(color).expect("Lights output failure");
-            self.last = color;
+        if next != self.last {
+            self.output.set(next).expect("Lights output failure");
+            self.last = next;
         }
     }
 }
@@ -324,11 +354,11 @@ fn osc_server(lights: SharedLights) {
     }
 }
 
-fn anim_output(lights: SharedLights, chronon: Duration) {
-    println!("{}{}", Paint::masked("🔦 "), Paint::default("Light animation output started").bold());
+fn pattern_output(lights: SharedLights, chronon: Duration) {
+    println!("{}{}", Paint::masked("🔦 "), Paint::default("Light pattern output started").bold());
 
     loop {
-        lights.lock().unwrap().tick(chronon.as_millis() as u32);
+        lights.lock().unwrap().tick();
         thread::sleep(chronon);
     }
 }
@@ -348,7 +378,7 @@ fn main() {
             green: gpio.get(27).unwrap().into_output(),
             blue: gpio.get(22).unwrap().into_output(),
         },
-        vec![(initial, 0)],
+        Pattern::Solid(initial),
     )));
 
     let lights_rocket = Arc::clone(&lights);
@@ -365,9 +395,9 @@ fn main() {
                 osc_server(lights_osc);
             });
         }))
-        .attach(AdHoc::on_launch("Light Animation Output", move |_rocket| {
+        .attach(AdHoc::on_launch("Light Pattern Output", move |_rocket| {
             thread::spawn(move || {
-                anim_output(lights_output, chronon);
+                pattern_output(lights_output, chronon);
             });
         }))
         .launch();
