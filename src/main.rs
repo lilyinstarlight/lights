@@ -29,6 +29,8 @@ use rppal::gpio::{Gpio, OutputPin};
 
 use serde::{Deserialize, Serialize};
 
+use serde_with::{serde_as, DurationMilliSeconds};
+
 use yansi::Paint;
 
 
@@ -92,13 +94,16 @@ impl fmt::Display for Color {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
 struct Frame {
     color: Color,
+    #[serde_as(as = "DurationMilliSeconds")]
     duration: Duration,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase", tag = "type", content = "content")]
 enum Pattern {
     Off,
     Solid(Color),
@@ -239,6 +244,18 @@ fn get_color(lights: State<SharedLights>) -> Json<Color> {
 #[put("/color", data = "<color>")]
 fn set_color(color: Json<Color>, lights: State<SharedLights>) -> Status {
     lights.lock().unwrap().set(*color);
+
+    Status::NoContent
+}
+
+#[get("/pattern")]
+fn get_pattern(lights: State<SharedLights>) -> Json<Pattern> {
+    Json(lights.lock().unwrap().get_pattern().clone())
+}
+
+#[put("/pattern", data = "<pattern>")]
+fn set_pattern(pattern: Json<Pattern>, lights: State<SharedLights>) -> Status {
+    lights.lock().unwrap().set_pattern(&pattern);
 
     Status::NoContent
 }
@@ -386,7 +403,7 @@ fn main() {
     let lights_output = Arc::clone(&lights);
 
     rocket::ignite()
-        .mount("/", routes![get_color, set_color, files, form, form_submit])
+        .mount("/", routes![get_color, set_color, get_pattern, set_pattern, files, form, form_submit])
         .register(catchers![bad_request, unprocessable_entity, not_found])
         .manage(lights_rocket)
         .attach(Template::fairing())
