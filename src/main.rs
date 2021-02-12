@@ -349,6 +349,35 @@ fn osc_server(lights: SharedLights) {
                                             }
                                         }
                                     },
+                                    "/pattern/off" => {
+                                        match &msg.args[..] {
+                                            [] => {
+                                                lights.lock().unwrap().set_pattern(&Pattern::Off);
+                                            },
+                                            _ => {
+                                                eprintln!("Unexpected OSC /pattern/off command: {:?}", msg.args);
+                                            }
+                                        }
+                                    },
+                                    "/pattern/solid" => {
+                                        match &msg.args[..] {
+                                            [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
+                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
+                                            },
+                                            [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
+                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
+                                            },
+                                            [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
+                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
+                                            },
+                                            [OscType::Color(color)] => {
+                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: color.red, green: color.green, blue: color.blue }));
+                                            },
+                                            _ => {
+                                                eprintln!("Unexpected OSC /pattern/solid command: {:?}", msg.args);
+                                            }
+                                        }
+                                    },
                                     _ => {
                                         eprintln!("Unexpected OSC Message: {}: {:?}", msg.addr, msg.args);
                                     }
