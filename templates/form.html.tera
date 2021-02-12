@@ -6,6 +6,10 @@
 {{ super() }}
 <link href="static/vendor/color-picker.min.css" rel="stylesheet"/>
 <style>
+	input[type=color].is-static:active {
+		background: #ddd;
+	}
+
 	.color-picker\:a {
 		display: none;
 	}
@@ -31,6 +35,7 @@
 <script>
 	function addPicker(element) {
 		const picker = new CP(element);
+		element.classList.add('is-static');
 		element.addEventListener('click', ev => ev.preventDefault());
 
 		picker.on('blur', () => {});
