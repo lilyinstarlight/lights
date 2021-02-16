@@ -412,7 +412,7 @@ fn pattern_output(lights: SharedLights, chronon: Duration) {
 fn main() {
     let initial = Color { red: 242, green: 155, blue: 212 };
 
-    let chronon = Duration::from_millis(50);
+    let chronon = Duration::from_millis(10);
 
     let gpio = Gpio::new().unwrap();
 
