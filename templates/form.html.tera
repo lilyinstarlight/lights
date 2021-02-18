@@ -1,6 +1,6 @@
 {% extends "base" %}
 
-{% block title %}Color Changer{% endblock title %}
+{% block title %}Lights!{% endblock title %}
 
 {% block head %}
 {{ super() }}
@@ -25,6 +25,7 @@
 {% endblock head %}
 
 {% block content %}
+<h1>Lights!</h1>
 <form method="post">
 	<p id="color_picker"></p>
 	<input id="color" name="color" type="color" value="{{ color }}"/>
