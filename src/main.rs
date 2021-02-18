@@ -196,11 +196,10 @@ impl Lights {
             Pattern::Custom(frames) => {
                 if frames.len() > 0 {
                     if self.frame >= frames.len() {
-                        self.instant = Instant::now();
                         self.frame = 0;
                     }
 
-                    if self.instant.elapsed() >= frames[self.frame].duration {
+                    while self.instant.elapsed() >= frames[self.frame].duration {
                         self.instant = self.instant.checked_add(frames[self.frame].duration).unwrap();
                         self.frame = (self.frame + 1) % frames.len();
                     }
