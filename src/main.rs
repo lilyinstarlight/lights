@@ -401,7 +401,7 @@ fn osc_server(lights: SharedLights) {
 }
 
 fn pattern_output(lights: SharedLights, chronon: Duration) {
-    println!("{}{}", Paint::masked("🔦 "), Paint::default("Light pattern output started").bold());
+    println!("{}{}", Paint::masked("💡 "), Paint::default("Light pattern output started").bold());
 
     loop {
         lights.lock().unwrap().tick();
