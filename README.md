@@ -1,16 +1,16 @@
 Lights!
 =======
 
-Controlling an RGB LED light strip from a Raspberry Pi!
+Controlling an RGB LED light strip over the network via a Raspberry Pi
 
 
 Features
 --------
 
 * Should work with common-anode RGB LED strips
-* Web form for setting colors
+* Web form for setting colors (color picker imported from [taufik-nurrohman/color-picker](https://github.com/taufik-nurrohman/color-picker), falls back to HTML5 color picker if no JavaScript)
 * HTTP JSON API for setting colors, predefined patterns, or custom timed patterns
-* UDP OSC API for setting colors or predefined patterns
+* UDP OSC API for setting colors or predefined patterns (tested with [Sonic Pi](https://sonic-pi.net))
 
 
 Hardware
