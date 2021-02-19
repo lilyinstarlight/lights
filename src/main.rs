@@ -4,6 +4,7 @@
 
 use std::env;
 use std::fmt;
+use std::panic;
 use std::thread;
 
 use std::collections::HashMap;
@@ -429,6 +430,12 @@ fn main() {
     let lights_rocket = Arc::clone(&lights);
     let lights_osc = Arc::clone(&lights);
     let lights_output = Arc::clone(&lights);
+
+    let orig_panic_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        orig_panic_hook(info);
+        process::exit(1);
+    }));
 
     rocket::ignite()
         .mount("/", routes![get_color, set_color, get_pattern, set_pattern, files, form, form_submit])
