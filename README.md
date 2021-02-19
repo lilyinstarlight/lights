@@ -16,6 +16,8 @@ Features
 Hardware
 --------
 
+***Note: I only know enough about electronics hardware to be dangerous. This could fry a Raspberry Pi given it is using an external (but regulated) non-USB power source or fry it for other reasons. It hasn't broken mine yet running all of the time but it is still quite possible. I'm not responsible if the hardware causes the magic blue smoke to leave your Raspberry Pi or summons demons that break your LED strip.***
+
 ### Parts Used
 
 * 3x [N-channel MOSFETs](https://www.sparkfun.com/products/10213)
