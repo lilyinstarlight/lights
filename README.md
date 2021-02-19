@@ -47,7 +47,7 @@ API
 
 ### JSON
 
-#### `/color`
+#### Endpoint: `/color`
 
 ##### Methods
 
@@ -68,7 +68,7 @@ API
 ```
 
 
-#### `/pattern`
+#### Endpoint: `/pattern`
 
 ##### Methods
 
@@ -140,9 +140,9 @@ Durations are in milliseconds
 
 ### OSC
 
-#### `/color`
+#### Address: `/color`
 
-##### Format
+##### Arguments
 
 Multiple formats accepted
 
@@ -169,17 +169,17 @@ color: rgba
 ```
 
 
-#### `/pattern/off`
+#### Address: `/pattern/off`
 
 
-##### Format
+##### Arguments
 
 [no arguments]
 
 
-#### `/pattern/solid`
+#### Address: `/pattern/solid`
 
-##### Format
+##### Arguments
 
 Multiple formats accepted
 
