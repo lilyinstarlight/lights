@@ -9,12 +9,15 @@ use std::process;
 use std::thread;
 
 use std::collections::HashMap;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use futures_util::{SinkExt, StreamExt};
+use futures_util::stream::SplitSink;
 
 use rocket::State;
 use rocket::fairing::AdHoc;
@@ -32,6 +35,12 @@ use rppal::gpio::{Gpio, OutputPin};
 use serde::{Deserialize, Serialize};
 
 use serde_with::{serde_as, DurationMilliSeconds};
+
+use tokio::net::{TcpListener, TcpStream};
+use tokio::runtime;
+
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message as WSMessage;
 
 use yansi::Paint;
 
@@ -65,11 +74,11 @@ impl FromStr for Color {
         }();
 
         match result {
-            Err(_err) => {
-                return Err(Self::Err::ParseError);
-            },
             Ok(color) => {
                 return Ok(color);
+            },
+            Err(_err) => {
+                return Err(Self::Err::ParseError);
             }
         }
     }
@@ -80,11 +89,11 @@ impl<'v> FromFormValue<'v> for Color {
 
     fn from_form_value(value: &'v RawStr) -> Result<Self, Self::Error> {
         match value.url_decode() {
-            Err(_err) => {
-                return Err(Self::Error::BadFormat);
-            },
             Ok(color) => {
                 return Color::from_str(&color);
+            },
+            Err(_err) => {
+                return Err(Self::Error::BadFormat);
             }
         }
     }
@@ -261,6 +270,11 @@ fn set_pattern(pattern: Json<Pattern>, lights: State<SharedLights>) -> Status {
     Status::NoContent
 }
 
+#[get("/wsinfo")]
+fn ws_info() -> Status {
+    Status::NoContent
+}
+
 #[get("/static/<file..>")]
 fn files(file: PathBuf) -> Option<NamedFile> {
     NamedFile::open(Path::new("static/").join(file)).ok()
@@ -306,18 +320,137 @@ fn not_found() -> Json<APIError> {
     })
 }
 
+fn ws_server(lights: SharedLights, chronon: Duration) {
+    let address = match env::var("WS_ADDRESS") {
+        Ok(val) => val,
+        Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })
+    };
+
+    let port: u16 = match env::var("WS_PORT") {
+        Ok(val) => val.parse().unwrap(),
+        Err(_err) => 8001
+    };
+
+    let runtime = runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
+
+    runtime.block_on(async move {
+        let listener = TcpListener::bind((address, port)).await.expect("Failed to bind TCP WebSocket address");
+
+        println!("{}{} {}", Paint::masked("🛰  "), Paint::default("WebSocket server started on").bold(), Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string()).bold().underline());
+
+        let streams = Arc::new(Mutex::new(HashMap::<SocketAddr, SplitSink<WebSocketStream<TcpStream>, WSMessage>>::new()));
+
+        let mut last_color = lights.lock().unwrap().get();
+
+        let mut interval = tokio::time::interval(chronon);
+
+        loop {
+            tokio::select! {
+                connection = listener.accept() => {
+                    match connection {
+                        Ok((socket, _)) => {
+                            match tokio_tungstenite::accept_async(socket).await {
+                                Ok(stream) => {
+                                    let peer = stream.get_ref().peer_addr().unwrap();
+
+                                    let (sender, mut receiver) = stream.split();
+
+                                    streams.lock().unwrap().insert(peer, sender);
+
+                                    let lights_conn = Arc::clone(&lights);
+                                    let streams_conn = Arc::clone(&streams);
+
+                                    tokio::spawn(async move {
+                                        loop {
+                                            match receiver.next().await {
+                                                Some(Ok(WSMessage::Text(string))) => {
+                                                    match serde_json::from_str::<Color>(&string) {
+                                                        Ok(color) => {
+                                                            lights_conn.lock().unwrap().set(color);
+                                                        },
+                                                        Err(err) => {
+                                                            eprintln!("Failed to parse color from WebSocket: {}", err);
+                                                        }
+                                                    }
+                                                },
+                                                Some(Ok(WSMessage::Close(_frame))) => {
+                                                    break;
+                                                },
+                                                Some(Ok(_)) => {
+                                                    // ignore other message types
+                                                },
+                                                Some(Err(err)) => {
+                                                    eprintln!("Failed to poll WebSocket connection: {}", err);
+                                                    break;
+                                                },
+                                                None => {
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        let removed = streams_conn.lock().unwrap().remove(&peer);
+
+                                        match removed {
+                                            Some(mut stream) => {
+                                                match stream.close().await {
+                                                    Ok(()) => {},
+                                                    Err(err) => {
+                                                        eprintln!("Failed to close WebSocket connection: {}", err);
+                                                    }
+                                                }
+                                            },
+                                            None => {}
+                                        }
+                                    });
+                                },
+                                Err(err) => {
+                                    eprintln!("Failed to accept WebSocket connection: {}", err);
+                                }
+                            }
+                        },
+                        Err(err) => {
+                            eprintln!("Failed to accept WebSocket connection: {}", err);
+                        }
+                    }
+                }
+
+                _ = interval.tick() => {
+                    let color = lights.lock().unwrap().get();
+
+                    if color != last_color {
+                        let string = serde_json::to_string(&color).unwrap();
+
+                        for (_, stream) in streams.lock().unwrap().iter_mut() {
+                            match stream.send(WSMessage::Text(string.clone())).await {
+                                Ok(_) => {},
+                                Err(err) => {
+                                    // task should handle removal on I/O errors
+                                    eprintln!("Failed to send color to WebSocket: {}", err);
+                                }
+                            }
+                        }
+
+                        last_color = color;
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn osc_server(lights: SharedLights) {
     let address = match env::var("OSC_ADDRESS") {
         Ok(val) => val,
-        Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" }),
+        Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })
     };
 
     let port: u16 = match env::var("OSC_PORT") {
         Ok(val) => val.parse().unwrap(),
-        Err(_err) => 1337,
+        Err(_err) => 1337
     };
 
-    let socket = UdpSocket::bind((address, port)).unwrap();
+    let socket = UdpSocket::bind((address, port)).expect("Failed to bind UDP OSC address");
 
     println!("{}{} {}", Paint::masked("🎛  "), Paint::default("OSC server started on").bold(), Paint::default(socket.local_addr().unwrap()).bold().underline());
 
@@ -429,8 +562,12 @@ fn main() {
     )));
 
     let lights_rocket = Arc::clone(&lights);
+    let lights_ws = Arc::clone(&lights);
     let lights_osc = Arc::clone(&lights);
     let lights_output = Arc::clone(&lights);
+
+    let chronon_ws = chronon.clone();
+    let chronon_output = chronon.clone();
 
     let orig_panic_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -439,10 +576,15 @@ fn main() {
     }));
 
     rocket::ignite()
-        .mount("/", routes![get_color, set_color, get_pattern, set_pattern, files, form, form_submit])
+        .mount("/", routes![get_color, set_color, get_pattern, set_pattern, ws_info, files, form, form_submit])
         .register(catchers![bad_request, unprocessable_entity, not_found])
         .manage(lights_rocket)
         .attach(Template::fairing())
+        .attach(AdHoc::on_launch("WebSocket Server", move |_rocket| {
+            thread::spawn(move || {
+                ws_server(lights_ws, chronon_ws);
+            });
+        }))
         .attach(AdHoc::on_launch("OSC Server", move |_rocket| {
             thread::spawn(move || {
                 osc_server(lights_osc);
@@ -450,7 +592,7 @@ fn main() {
         }))
         .attach(AdHoc::on_launch("Light Pattern Output", move |_rocket| {
             thread::spawn(move || {
-                pattern_output(lights_output, chronon);
+                pattern_output(lights_output, chronon_output);
             });
         }))
         .launch();

@@ -26,7 +26,7 @@
 
 {% block content %}
 <h1>Lights!</h1>
-<form method="post">
+<form id="color_form" method="post">
 	<p id="color_picker"></p>
 	<input id="color" name="color" type="color" value="{{ color }}"/>
 	<p></p>
@@ -34,20 +34,88 @@
 </form>
 <script src="static/vendor/color-picker.min.js"></script>
 <script>
-	function addPicker(element) {
-		const picker = new CP(element);
-		element.classList.add('is-static');
-		element.addEventListener('click', ev => ev.preventDefault());
+	const element = document.getElementById('color');
 
-		picker.on('blur', () => {});
-		picker.on('focus', () => {});
-		picker.on('change', function (red, green, blue) {
-			this.source.value = this.color(red, green, blue, 1);
-		});
-		picker.self.classList.add('is-static');
-		picker.enter(document.getElementById(element.name + '_picker'));
+	const picker = new CP(element);
+	element.classList.add('is-static');
+	element.addEventListener('click', ev => ev.preventDefault());
+
+	picker.on('blur', () => {});
+	picker.on('focus', () => {});
+	picker.on('change', function (red, green, blue) {
+		this.source.value = this.color(red, green, blue, 1);
+	});
+	picker.self.classList.add('is-static');
+	picker.enter(document.getElementById(element.name + '_picker'));
+
+	let current = picker.source.value;
+
+	function num2hex(num) {
+		return ('0' + (num).toString(16)).slice(-2);
 	}
 
-	document.querySelectorAll('input[type=color]').forEach(addPicker);
+	function hex2num(hex) {
+		return parseInt(hex, 16);
+	}
+
+	function encodeColor(color) {
+		return '#' + num2hex(color['red']) + num2hex(color['green']) + num2hex(color['blue'])
+	}
+
+	function decodeColor(str) {
+		return {
+			'red': hex2num(str.slice(1, 3)),
+			'green': hex2num(str.slice(3, 5)),
+			'blue': hex2num(str.slice(5, 7)),
+		};
+	}
+
+	let ws = null;
+	let wsinfo = null;
+
+	function submitWebSocket(ev) {
+		ws.send(JSON.stringify(decodeColor(picker.source.value)));
+
+		current = picker.source.value;
+
+		ev.preventDefault();
+	}
+
+	function connectWebSocket() {
+		ws = new WebSocket(wsinfo);
+
+		ws.addEventListener('open', () => {
+			document.getElementById('color_form').addEventListener('submit', submitWebSocket);
+		});
+
+		ws.addEventListener('message', (ev) => {
+			const color = JSON.parse(ev.data);
+
+			if (picker.source.value === current) {
+				const encoded = encodeColor(color);
+
+				picker.source.value = encoded;
+				picker.set(color['red'], color['green'], color['blue']);
+
+				current = encoded;
+			}
+		});
+
+		ws.addEventListener('close', () => {
+			document.getElementById('color_form').removeEventListener('submit', submitWebSocket);
+
+			setTimeout(connectWebSocket, 5000);
+		});
+	}
+
+	const xhr = new XMLHttpRequest();
+
+	xhr.addEventListener('load', () => {
+		wsinfo = xhr.responseText || (window.location.protocol.replace('http', 'ws') + '//' + window.location.hostname + ':8001' + '/');
+
+		connectWebSocket();
+	});
+	xhr.open('GET', '/wsinfo');
+	xhr.send();
 </script>
 {% endblock content %}
