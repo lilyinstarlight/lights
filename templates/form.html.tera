@@ -4,7 +4,7 @@
 
 {% block head %}
 {{ super() }}
-<link href="static/vendor/color-picker.min.css" rel="stylesheet"/>
+<link href="static/vendor/color-picker/color-picker.min.css" rel="stylesheet"/>
 <style>
 	input[type=color].is-static:active {
 		background: #ddd;
@@ -32,7 +32,7 @@
 	<p></p>
 	<button type="submit">Set</button>
 </form>
-<script src="static/vendor/color-picker.min.js"></script>
+<script src="static/vendor/color-picker/color-picker.min.js"></script>
 <script>
 	const element = document.getElementById('color');
 
