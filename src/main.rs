@@ -336,7 +336,7 @@ fn ws_server(lights: SharedLights, chronon: Duration) {
     runtime.block_on(async move {
         let listener = TcpListener::bind((address, port)).await.expect("Failed to bind TCP WebSocket address");
 
-        println!("{}{} {}", Paint::masked("🛰  "), Paint::default("WebSocket server started on").bold(), Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string()).bold().underline());
+        println!("{}{} {}", Paint::masked("🕸  "), Paint::default("WebSocket server started on").bold(), Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string()).bold().underline());
 
         let streams = Arc::new(Mutex::new(HashMap::<SocketAddr, SplitSink<WebSocketStream<TcpStream>, WSMessage>>::new()));
 
