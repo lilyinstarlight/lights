@@ -206,3 +206,19 @@ blue: float64
 ```
 color: rgba
 ```
+
+
+### WebSocket
+
+The WebSocket interface streams color updates to the client (which includes color updates as part of timed patterns) and supports receiving messages to set solid colors.
+
+
+##### Format
+
+```
+{
+  "red": 0,
+  "green": 169,
+  "blue": 255
+}
+```
