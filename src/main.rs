@@ -271,8 +271,11 @@ fn set_pattern(pattern: Json<Pattern>, lights: State<SharedLights>) -> Status {
 }
 
 #[get("/wsinfo")]
-fn ws_info() -> Status {
-    Status::NoContent
+fn ws_info() -> String {
+    match env::var("WS_INFO") {
+        Ok(val) => val,
+        Err(_err) => String::from("")
+    }
 }
 
 #[get("/static/<file..>")]
