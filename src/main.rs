@@ -385,7 +385,7 @@ fn ws_server(lights: SharedLights, chronon: Duration) {
                                                 Some(Err(WSError::Protocol(ref err))) if err == "Connection reset without closing handshake" => {
                                                     // resets seem to be common for browsers
                                                     break;
-                                                }
+                                                },
                                                 Some(Err(err)) => {
                                                     eprintln!("Failed to poll WebSocket connection: {}", err);
                                                     break;
