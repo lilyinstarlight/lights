@@ -23,7 +23,7 @@ use rocket::State;
 use rocket::fairing::AdHoc;
 use rocket::http::{RawStr, Status};
 use rocket::request::{Form, FromFormValue};
-use rocket::response::NamedFile;
+use rocket::response::{NamedFile, Redirect};
 
 use rocket_contrib::json::Json;
 use rocket_contrib::templates::Template;
@@ -293,10 +293,10 @@ fn form(lights: State<SharedLights>) -> Template {
 }
 
 #[post("/", data = "<color_form>")]
-fn form_submit(color_form: Form<ColorForm>, lights: State<SharedLights>) -> Template {
+fn form_submit(color_form: Form<ColorForm>, lights: State<SharedLights>) -> Redirect {
     lights.lock().unwrap().set(color_form.color);
 
-    form(lights)
+    Redirect::to(uri!(form))
 }
 
 #[catch(400)]
