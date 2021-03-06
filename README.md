@@ -210,7 +210,9 @@ color: rgba
 
 ### WebSocket
 
-The WebSocket interface streams color updates to the client (which includes color updates as part of timed patterns) and supports receiving messages to set solid colors. The URI to connect to the WebSocket can be retrieved from a `GET` request to the `/wsinfo` endpoint. If the response from `/wsinfo` is empty, a default of `ws://<hostname>:8001/` should be assumed.
+The WebSocket interface streams color updates to the client (which includes color updates as part of timed patterns) and supports receiving messages to set solid colors.
+
+The URI to connect to the WebSocket can be retrieved by making a `GET` request to the `/wsinfo` endpoint. If the response from `/wsinfo` is empty, a default of `ws://<hostname>:8001/` should be assumed.
 
 
 ##### Format
