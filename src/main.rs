@@ -356,7 +356,15 @@ fn ws_server(lights: SharedLights, chronon: Duration) {
                                 Ok(stream) => {
                                     let peer = stream.get_ref().peer_addr().unwrap();
 
-                                    let (sender, mut receiver) = stream.split();
+                                    let (mut sender, mut receiver) = stream.split();
+
+                                    match sender.send(WSMessage::Text(serde_json::to_string(&lights.lock().unwrap().get()).unwrap())).await {
+                                        Ok(_) => {},
+                                        Err(err) => {
+                                            // task should handle removal on I/O errors
+                                            eprintln!("Failed to send color to WebSocket: {}", err);
+                                        }
+                                    }
 
                                     streams.lock().unwrap().insert(peer, sender);
 
