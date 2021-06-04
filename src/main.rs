@@ -41,6 +41,7 @@ use tokio::runtime;
 
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::{Error as WSError, Message as WSMessage};
+use tokio_tungstenite::tungstenite::error::ProtocolError as WSProtocolError;
 
 use yansi::Paint;
 
@@ -390,7 +391,7 @@ fn ws_server(lights: SharedLights, chronon: Duration) {
                                                 Some(Ok(_)) => {
                                                     // ignore other message types
                                                 },
-                                                Some(Err(WSError::Protocol(ref err))) if err == "Connection reset without closing handshake" => {
+                                                Some(Err(WSError::Protocol(WSProtocolError::ResetWithoutClosingHandshake))) => {
                                                     // resets seem to be common for browsers
                                                     break;
                                                 },
