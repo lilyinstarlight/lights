@@ -30,25 +30,35 @@
 	<p id="color_picker"></p>
 	<input id="color" name="color" type="color" value="{{ color }}"/>
 	<p></p>
-	<button type="submit">Set</button>
+	<button id="color_submit" type="submit">Set</button>
 </form>
 <script src="static/vendor/color-picker/color-picker.min.js"></script>
 <script>
+	let ws = null;
+	let wsinfo = null;
+
 	const element = document.getElementById('color');
 
 	const picker = new CP(element);
 	element.classList.add('is-static');
 	element.addEventListener('click', ev => ev.preventDefault());
 
+	let current = picker.source.value;
+
 	picker.on('blur', () => {});
 	picker.on('focus', () => {});
 	picker.on('change', function (red, green, blue) {
 		this.source.value = this.color(red, green, blue, 1);
+
+		if (ws && picker.source.value === current) {
+			document.getElementById(this.source.name + '_submit').disabled = true;
+		}
+		else {
+			document.getElementById(this.source.name + '_submit').disabled = false;
+		}
 	});
 	picker.self.classList.add('is-static');
-	picker.enter(document.getElementById(element.name + '_picker'));
-
-	let current = picker.source.value;
+	picker.enter(document.getElementById(picker.source.name + '_picker'));
 
 	function num2hex(num) {
 		return ('0' + (num).toString(16)).slice(-2);
@@ -70,13 +80,12 @@
 		};
 	}
 
-	let ws = null;
-	let wsinfo = null;
-
 	function submitWebSocket(ev) {
 		ws.send(JSON.stringify(decodeColor(picker.source.value)));
 
 		current = picker.source.value;
+
+		document.getElementById(picker.source.name + '_submit').disabled = true;
 
 		ev.preventDefault();
 	}
@@ -85,7 +94,7 @@
 		ws = new WebSocket(wsinfo);
 
 		ws.addEventListener('open', () => {
-			document.getElementById('color_form').addEventListener('submit', submitWebSocket);
+			document.getElementById(picker.source.name + '_form').addEventListener('submit', submitWebSocket);
 		});
 
 		ws.addEventListener('message', (ev) => {
@@ -98,11 +107,16 @@
 				picker.set(color['red'], color['green'], color['blue']);
 
 				current = encoded;
+
+				document.getElementById(picker.source.name + '_submit').disabled = true;
 			}
 		});
 
 		ws.addEventListener('close', () => {
-			document.getElementById('color_form').removeEventListener('submit', submitWebSocket);
+			document.getElementById(picker.source.name + '_form').removeEventListener('submit', submitWebSocket);
+			document.getElementById(picker.source.name + '_submit').disabled = false;
+
+			ws = null;
 
 			setTimeout(connectWebSocket, 5000);
 		});

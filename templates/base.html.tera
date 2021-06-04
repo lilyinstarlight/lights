@@ -19,7 +19,7 @@
 			}
 
 			h1, h2, h3, h4, h5, h6 {
-				font-family: helvetica, sans-serif;
+				font-family: Segoe UI, Aileron, helvetica, sans-serif;
 				font-weight: lighter;
 				color: #fff;
 			}
@@ -33,8 +33,13 @@
 				width: 120px;
 			}
 
-			button:active {
+			button:active:enabled {
 				background: #bbb;
+			}
+
+			button:disabled {
+				background: #eee;
+				color: #888;
 			}
 
 			input {
@@ -45,8 +50,13 @@
 				width: 120px;
 			}
 
-			input:active {
+			input:active:enabled {
 				background: #bbb;
+			}
+
+			input:disabled {
+				background: #eee;
+				color: #888;
 			}
 		</style>
 		{% endblock head %}
