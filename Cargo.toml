@@ -1,6 +1,6 @@
 [package]
 name = "fooster_lights"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Lily Foster <lily@lily.flowers>"]
 edition = "2018"
 publish = false
@@ -9,13 +9,12 @@ publish = false
 
 [dependencies]
 futures-util = "^0.3"
-rocket = "^0.4"
-rocket_contrib = { version = "^0.4", features = ["json", "tera_templates"] }
+#rocket = { version = "^0.5", features = ["json"] }
+#rocket_dyn_templates = { version = "^0.1", features = ["tera"] }
+rocket = { version = "0.5.0-rc.1", features = ["json"] }
+rocket_dyn_templates = { version = "0.1.0-rc.1", features = ["tera"] }
 rosc = "^0.5"
 rppal = "^0.12"
-serde = { version = "^1.0", features = ["derive"] }
-serde_json = "^1.0"
 serde_with = "^1.9"
-tokio = { version = "^1.6", features = ["macros", "net", "rt", "time"] }
 tokio-tungstenite = "^0.14"
 yansi = "^0.5"

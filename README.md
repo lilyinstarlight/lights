@@ -41,7 +41,7 @@ Image generated with [Fritzing](https://fritzing.org)
 Software
 --------
 
-A nightly Rust toolchain is required so using [rustup](https://rustup.rs) is recommended. Running `cargo run --release` will run the daemon, which includes a light pattern animation and output thread, HTTP server, and OSC server. In a deployment, the `static` and `templates` directories as well as the binary are the only artifacts needed.
+A Rust toolchain (stable or unstable) is required, and using [rustup](https://rustup.rs) is recommended to ensure a current toolchain on Raspberry Pi OS. Running `cargo run --release` will run the daemon, which includes a light pattern animation and output thread, HTTP server, WebSocket server, and OSC server. In a deployment, the `static` and `templates` directories as well as the binary are the only artifacts needed.
 
 
 API

@@ -1,43 +1,45 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-
-#[macro_use] extern crate rocket;
+#[macro_use]
+extern crate rocket;
 
 use std::env;
-use std::fmt;
 use std::panic;
-use std::process;
-use std::thread;
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
+use std::error::Error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::net::SocketAddr;
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
-use futures_util::{SinkExt, StreamExt};
-use futures_util::stream::SplitSink;
-
-use rocket::State;
+use rocket::{Config, State};
 use rocket::fairing::AdHoc;
-use rocket::http::{RawStr, Status};
-use rocket::request::{Form, FromFormValue};
-use rocket::response::{NamedFile, Redirect};
+use rocket::form::{Error as FormError, Form, FromFormField, Result as FormResult, ValueField};
+use rocket::fs::NamedFile;
+use rocket::http::Status;
+use rocket::response::Redirect;
 
-use rocket_contrib::json::Json;
-use rocket_contrib::templates::Template;
+use rocket::futures::sink::SinkExt;
+use rocket::futures::stream::{SplitSink, StreamExt};
+
+use rocket::serde::{Deserialize, Serialize};
+use rocket::serde::json::serde_json;
+use rocket::serde::json::Json;
+
+use rocket::tokio;
+use rocket::tokio::net::{TcpListener, TcpStream, UdpSocket};
+use rocket::tokio::sync::Mutex;
+use rocket::tokio::time;
+use rocket::tokio::time::{Duration, Instant};
+
+use rocket_dyn_templates::Template;
 
 use rosc::{OscPacket, OscType};
 
 use rppal::gpio::{Gpio, OutputPin};
 
-use serde::{Deserialize, Serialize};
-
 use serde_with::{serde_as, DurationMilliSeconds};
-
-use tokio::net::{TcpListener, TcpStream};
-use tokio::runtime;
 
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::{Error as WSError, Message as WSMessage};
@@ -47,15 +49,37 @@ use yansi::Paint;
 
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
 struct Color {
     red: u8,
     green: u8,
     blue: u8,
 }
 
-enum ColorError {
+#[derive(Debug)]
+enum ColorErrorKind {
     BadFormat,
     ParseError,
+}
+
+#[derive(Debug)]
+struct ColorError {
+    kind: ColorErrorKind,
+}
+
+impl Error for ColorError {}
+
+impl Display for ColorError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match &self.kind {
+            ColorErrorKind::BadFormat => {
+                write!(f, "unknown color format")
+            },
+            ColorErrorKind::ParseError => {
+                write!(f, "error parsing color format")
+            },
+        }
+    }
 }
 
 impl FromStr for Color {
@@ -63,7 +87,7 @@ impl FromStr for Color {
 
     fn from_str(color: &str) -> Result<Self, Self::Err> {
         if &color[0..1] != "#" || color.len() != 7 {
-            return Err(Self::Err::BadFormat);
+            return Err(Self::Err { kind: ColorErrorKind::BadFormat })
         }
 
         let result = || -> Result<Color, ParseIntError> {
@@ -76,38 +100,38 @@ impl FromStr for Color {
 
         match result {
             Ok(color) => {
-                return Ok(color);
+                Ok(color)
             },
             Err(_err) => {
-                return Err(Self::Err::ParseError);
+                Err(Self::Err { kind: ColorErrorKind::ParseError })
             }
         }
     }
 }
 
-impl<'v> FromFormValue<'v> for Color {
-    type Error = ColorError;
-
-    fn from_form_value(value: &'v RawStr) -> Result<Self, Self::Error> {
-        match value.url_decode() {
+#[rocket::async_trait]
+impl<'r> FromFormField<'r> for Color {
+    fn from_value(field: ValueField<'r>) -> FormResult<'r, Self> {
+        match Color::from_str(field.value) {
             Ok(color) => {
-                return Color::from_str(&color);
+                Ok(color)
             },
-            Err(_err) => {
-                return Err(Self::Error::BadFormat);
+            Err(err) => {
+                Err(FormError::custom(err))?
             }
         }
     }
 }
 
-impl fmt::Display for Color {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Color {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "#{:02x}{:02x}{:02x}", self.red, self.green, self.blue)
     }
 }
 
 #[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
 struct Frame {
     color: Color,
     #[serde_as(as = "DurationMilliSeconds")]
@@ -115,7 +139,7 @@ struct Frame {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type", content = "content")]
+#[serde(crate = "rocket::serde", rename_all = "lowercase", tag = "type", content = "content")]
 enum Pattern {
     Off,
     Solid(Color),
@@ -235,6 +259,7 @@ impl Lights {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
 struct APIError {
     status: String,
     message: String,
@@ -248,31 +273,31 @@ struct ColorForm {
 type SharedLights = Arc<Mutex<Lights>>;
 
 #[get("/color")]
-fn get_color(lights: State<SharedLights>) -> Json<Color> {
-    Json(lights.lock().unwrap().get())
+async fn get_color(lights: &State<SharedLights>) -> Json<Color> {
+    Json(lights.lock().await.get())
 }
 
 #[put("/color", data = "<color>")]
-fn set_color(color: Json<Color>, lights: State<SharedLights>) -> Status {
-    lights.lock().unwrap().set(*color);
+async fn set_color(color: Json<Color>, lights: &State<SharedLights>) -> Status {
+    lights.lock().await.set(*color);
 
     Status::NoContent
 }
 
 #[get("/pattern")]
-fn get_pattern(lights: State<SharedLights>) -> Json<Pattern> {
-    Json(lights.lock().unwrap().get_pattern().clone())
+async fn get_pattern(lights: &State<SharedLights>) -> Json<Pattern> {
+    Json(lights.lock().await.get_pattern().clone())
 }
 
 #[put("/pattern", data = "<pattern>")]
-fn set_pattern(pattern: Json<Pattern>, lights: State<SharedLights>) -> Status {
-    lights.lock().unwrap().set_pattern(&pattern);
+async fn set_pattern(pattern: Json<Pattern>, lights: &State<SharedLights>) -> Status {
+    lights.lock().await.set_pattern(&pattern);
 
     Status::NoContent
 }
 
 #[get("/wsinfo")]
-fn ws_info() -> String {
+async fn ws_info() -> String {
     match env::var("WS_INFO") {
         Ok(val) => val,
         Err(_err) => String::from("")
@@ -280,28 +305,28 @@ fn ws_info() -> String {
 }
 
 #[get("/static/<file..>")]
-fn files(file: PathBuf) -> Option<NamedFile> {
-    NamedFile::open(Path::new("static/").join(file)).ok()
+async fn files(file: PathBuf) -> Option<NamedFile> {
+    NamedFile::open(Path::new("static/").join(file)).await.ok()
 }
 
 #[get("/")]
-fn form(lights: State<SharedLights>) -> Template {
+async fn form(lights: &State<SharedLights>) -> Template {
     let context = [
-        (String::from("color"), lights.lock().unwrap().get().to_string()),
+        (String::from("color"), lights.lock().await.get().to_string()),
     ];
 
     Template::render("form", context.iter().cloned().collect::<HashMap<String, String>>())
 }
 
 #[post("/", data = "<color_form>")]
-fn form_submit(color_form: Form<ColorForm>, lights: State<SharedLights>) -> Redirect {
-    lights.lock().unwrap().set(color_form.color);
+async fn form_submit(color_form: Form<ColorForm>, lights: &State<SharedLights>) -> Redirect {
+    lights.lock().await.set(color_form.color);
 
     Redirect::to(uri!(form))
 }
 
 #[catch(400)]
-fn bad_request() -> Json<APIError> {
+async fn bad_request() -> Json<APIError> {
     Json(APIError {
         status: String::from("error"),
         message: String::from("Malformed request"),
@@ -309,7 +334,7 @@ fn bad_request() -> Json<APIError> {
 }
 
 #[catch(422)]
-fn unprocessable_entity() -> Json<APIError> {
+async fn unprocessable_entity() -> Json<APIError> {
     Json(APIError {
         status: String::from("error"),
         message: String::from("Malformed request"),
@@ -317,14 +342,14 @@ fn unprocessable_entity() -> Json<APIError> {
 }
 
 #[catch(404)]
-fn not_found() -> Json<APIError> {
+async fn not_found() -> Json<APIError> {
     Json(APIError {
         status: String::from("error"),
         message: String::from("Resource not found"),
     })
 }
 
-fn ws_server(lights: SharedLights, chronon: Duration) {
+async fn ws_server(lights: SharedLights, chronon: Duration) {
     let address = match env::var("WS_ADDRESS") {
         Ok(val) => val,
         Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })
@@ -335,127 +360,123 @@ fn ws_server(lights: SharedLights, chronon: Duration) {
         Err(_err) => 8001
     };
 
-    let runtime = runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
+    let listener = TcpListener::bind((address, port)).await.expect("Failed to bind TCP WebSocket address");
 
-    runtime.block_on(async move {
-        let listener = TcpListener::bind((address, port)).await.expect("Failed to bind TCP WebSocket address");
+    println!("{}{} {}", Paint::masked("🕸  "), Paint::default("WebSocket server started on").bold(), Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string()).bold().underline());
 
-        println!("{}{} {}", Paint::masked("🕸  "), Paint::default("WebSocket server started on").bold(), Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string()).bold().underline());
+    let streams = Arc::new(Mutex::new(HashMap::<SocketAddr, SplitSink<WebSocketStream<TcpStream>, WSMessage>>::new()));
 
-        let streams = Arc::new(Mutex::new(HashMap::<SocketAddr, SplitSink<WebSocketStream<TcpStream>, WSMessage>>::new()));
+    let mut last_color = lights.lock().await.get();
 
-        let mut last_color = lights.lock().unwrap().get();
+    let mut interval = time::interval(chronon);
 
-        let mut interval = tokio::time::interval(chronon);
+    loop {
+        tokio::select! {
+            connection = listener.accept() => {
+                match connection {
+                    Ok((socket, _)) => {
+                        match tokio_tungstenite::accept_async(socket).await {
+                            Ok(stream) => {
+                                let peer = stream.get_ref().peer_addr().unwrap();
 
-        loop {
-            tokio::select! {
-                connection = listener.accept() => {
-                    match connection {
-                        Ok((socket, _)) => {
-                            match tokio_tungstenite::accept_async(socket).await {
-                                Ok(stream) => {
-                                    let peer = stream.get_ref().peer_addr().unwrap();
+                                let (mut sender, mut receiver) = stream.split();
 
-                                    let (mut sender, mut receiver) = stream.split();
-
-                                    match sender.send(WSMessage::Text(serde_json::to_string(&lights.lock().unwrap().get()).unwrap())).await {
-                                        Ok(_) => {},
-                                        Err(err) => {
-                                            // task should handle removal on I/O errors
-                                            eprintln!("Failed to send color to WebSocket: {}", err);
-                                        }
+                                match sender.send(WSMessage::Text(serde_json::to_string(&lights.lock().await.get()).unwrap())).await {
+                                    Ok(_) => {},
+                                    Err(err) => {
+                                        // task should handle removal on I/O errors
+                                        eprintln!("Failed to send color to WebSocket: {}", err);
                                     }
+                                }
 
-                                    streams.lock().unwrap().insert(peer, sender);
+                                streams.lock().await.insert(peer, sender);
 
-                                    let lights_conn = Arc::clone(&lights);
-                                    let streams_conn = Arc::clone(&streams);
+                                let lights_conn = Arc::clone(&lights);
+                                let streams_conn = Arc::clone(&streams);
 
-                                    tokio::spawn(async move {
-                                        loop {
-                                            match receiver.next().await {
-                                                Some(Ok(WSMessage::Text(string))) => {
-                                                    match serde_json::from_str::<Color>(&string) {
-                                                        Ok(color) => {
-                                                            lights_conn.lock().unwrap().set(color);
-                                                        },
-                                                        Err(err) => {
-                                                            eprintln!("Failed to parse color from WebSocket: {}", err);
-                                                        }
-                                                    }
-                                                },
-                                                Some(Ok(WSMessage::Close(_frame))) => {
-                                                    break;
-                                                },
-                                                Some(Ok(_)) => {
-                                                    // ignore other message types
-                                                },
-                                                Some(Err(WSError::Protocol(WSProtocolError::ResetWithoutClosingHandshake))) => {
-                                                    // resets seem to be common for browsers
-                                                    break;
-                                                },
-                                                Some(Err(err)) => {
-                                                    eprintln!("Failed to poll WebSocket connection: {}", err);
-                                                    break;
-                                                },
-                                                None => {
-                                                    break;
-                                                }
-                                            }
-                                        }
-
-                                        let removed = streams_conn.lock().unwrap().remove(&peer);
-
-                                        match removed {
-                                            Some(mut stream) => {
-                                                match stream.close().await {
-                                                    Ok(()) => {},
+                                tokio::spawn(async move {
+                                    loop {
+                                        match receiver.next().await {
+                                            Some(Ok(WSMessage::Text(string))) => {
+                                                match serde_json::from_str::<Color>(&string) {
+                                                    Ok(color) => {
+                                                        lights_conn.lock().await.set(color);
+                                                    },
                                                     Err(err) => {
-                                                        eprintln!("Failed to close WebSocket connection: {}", err);
+                                                        eprintln!("Failed to parse color from WebSocket: {}", err);
                                                     }
                                                 }
                                             },
-                                            None => {}
+                                            Some(Ok(WSMessage::Close(_frame))) => {
+                                                break;
+                                            },
+                                            Some(Ok(_)) => {
+                                                // ignore other message types
+                                            },
+                                            Some(Err(WSError::Protocol(WSProtocolError::ResetWithoutClosingHandshake))) => {
+                                                // resets seem to be common for browsers
+                                                break;
+                                            },
+                                            Some(Err(err)) => {
+                                                eprintln!("Failed to poll WebSocket connection: {}", err);
+                                                break;
+                                            },
+                                            None => {
+                                                break;
+                                            }
                                         }
-                                    });
-                                },
-                                Err(err) => {
-                                    eprintln!("Failed to accept WebSocket connection: {}", err);
-                                }
-                            }
-                        },
-                        Err(err) => {
-                            eprintln!("Failed to accept WebSocket connection: {}", err);
-                        }
-                    }
-                }
+                                    }
 
-                _ = interval.tick() => {
-                    let color = lights.lock().unwrap().get();
+                                    let removed = streams_conn.lock().await.remove(&peer);
 
-                    if color != last_color {
-                        let string = serde_json::to_string(&color).unwrap();
-
-                        for (_, stream) in streams.lock().unwrap().iter_mut() {
-                            match stream.send(WSMessage::Text(string.clone())).await {
-                                Ok(_) => {},
-                                Err(err) => {
-                                    // task should handle removal on I/O errors
-                                    eprintln!("Failed to send color to WebSocket: {}", err);
-                                }
+                                    match removed {
+                                        Some(mut stream) => {
+                                            match stream.close().await {
+                                                Ok(()) => {},
+                                                Err(err) => {
+                                                    eprintln!("Failed to close WebSocket connection: {}", err);
+                                                }
+                                            }
+                                        },
+                                        None => {}
+                                    }
+                                });
+                            },
+                            Err(err) => {
+                                eprintln!("Failed to accept WebSocket connection: {}", err);
                             }
                         }
-
-                        last_color = color;
+                    },
+                    Err(err) => {
+                        eprintln!("Failed to accept WebSocket connection: {}", err);
                     }
                 }
             }
+
+            _ = interval.tick() => {
+                let color = lights.lock().await.get();
+
+                if color != last_color {
+                    let string = serde_json::to_string(&color).unwrap();
+
+                    for (_, stream) in streams.lock().await.iter_mut() {
+                        match stream.send(WSMessage::Text(string.clone())).await {
+                            Ok(_) => {},
+                            Err(err) => {
+                                // task should handle removal on I/O errors
+                                eprintln!("Failed to send color to WebSocket: {}", err);
+                            }
+                        }
+                    }
+
+                    last_color = color;
+                }
+            }
         }
-    });
+    }
 }
 
-fn osc_server(lights: SharedLights) {
+async fn osc_server(lights: SharedLights) {
     let address = match env::var("OSC_ADDRESS") {
         Ok(val) => val,
         Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })
@@ -466,14 +487,14 @@ fn osc_server(lights: SharedLights) {
         Err(_err) => 1337
     };
 
-    let socket = UdpSocket::bind((address, port)).expect("Failed to bind UDP OSC address");
+    let socket = UdpSocket::bind((address, port)).await.expect("Failed to bind UDP OSC address");
 
     println!("{}{} {}", Paint::masked("🎛  "), Paint::default("OSC server started on").bold(), Paint::default(socket.local_addr().unwrap()).bold().underline());
 
     let mut buffer = [0u8; rosc::decoder::MTU];
 
     loop {
-        match socket.recv_from(&mut buffer) {
+        match socket.recv_from(&mut buffer).await {
             Ok((size, _addr)) => {
                 match rosc::decoder::decode(&buffer[..size]) {
                     Ok(packet) => {
@@ -483,16 +504,16 @@ fn osc_server(lights: SharedLights) {
                                     "/color" => {
                                         match &msg.args[..] {
                                             [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
-                                                lights.lock().unwrap().set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
+                                                lights.lock().await.set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
                                             },
                                             [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
-                                                lights.lock().unwrap().set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
+                                                lights.lock().await.set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
                                             },
                                             [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
-                                                lights.lock().unwrap().set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
+                                                lights.lock().await.set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
                                             },
                                             [OscType::Color(color)] => {
-                                                lights.lock().unwrap().set(Color { red: color.red, green: color.green, blue: color.blue });
+                                                lights.lock().await.set(Color { red: color.red, green: color.green, blue: color.blue });
                                             },
                                             _ => {
                                                 eprintln!("Unexpected OSC /color command: {:?}", msg.args);
@@ -502,7 +523,7 @@ fn osc_server(lights: SharedLights) {
                                     "/pattern/off" => {
                                         match &msg.args[..] {
                                             [] => {
-                                                lights.lock().unwrap().set_pattern(&Pattern::Off);
+                                                lights.lock().await.set_pattern(&Pattern::Off);
                                             },
                                             _ => {
                                                 eprintln!("Unexpected OSC /pattern/off command: {:?}", msg.args);
@@ -512,16 +533,16 @@ fn osc_server(lights: SharedLights) {
                                     "/pattern/solid" => {
                                         match &msg.args[..] {
                                             [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
-                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
+                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
                                             },
                                             [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
-                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
+                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
                                             },
                                             [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
-                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
+                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
                                             },
                                             [OscType::Color(color)] => {
-                                                lights.lock().unwrap().set_pattern(&Pattern::Solid(Color { red: color.red, green: color.green, blue: color.blue }));
+                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: color.red, green: color.green, blue: color.blue }));
                                             },
                                             _ => {
                                                 eprintln!("Unexpected OSC /pattern/solid command: {:?}", msg.args);
@@ -550,16 +571,19 @@ fn osc_server(lights: SharedLights) {
     }
 }
 
-fn pattern_output(lights: SharedLights, chronon: Duration) {
+async fn pattern_output(lights: SharedLights, chronon: Duration) {
     println!("{}{}", Paint::masked("💡 "), Paint::default("Light pattern output started").bold());
 
+    let mut interval = time::interval(chronon);
+
     loop {
-        lights.lock().unwrap().tick();
-        thread::sleep(chronon);
+        interval.tick().await;
+        lights.lock().await.tick();
     }
 }
 
-fn main() {
+#[launch]
+fn rocket() -> _ {
     let initial = Color { red: 242, green: 155, blue: 212 };
 
     let chronon = Duration::from_millis(10);
@@ -585,31 +609,26 @@ fn main() {
     let chronon_ws = chronon.clone();
     let chronon_output = chronon.clone();
 
-    let orig_panic_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |info| {
-        orig_panic_hook(info);
-        process::exit(1);
-    }));
-
-    rocket::ignite()
+    rocket::custom(Config::figment()
+            .merge(("address", (if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })))
+        )
         .mount("/", routes![get_color, set_color, get_pattern, set_pattern, ws_info, files, form, form_submit])
-        .register(catchers![bad_request, unprocessable_entity, not_found])
+        .register("/", catchers![bad_request, unprocessable_entity, not_found])
         .manage(lights_rocket)
         .attach(Template::fairing())
-        .attach(AdHoc::on_launch("WebSocket Server", move |_rocket| {
-            thread::spawn(move || {
-                ws_server(lights_ws, chronon_ws);
+        .attach(AdHoc::on_liftoff("WebSocket Server", move |_rocket| Box::pin(async move {
+            tokio::spawn(async move {
+                ws_server(lights_ws, chronon_ws).await;
             });
-        }))
-        .attach(AdHoc::on_launch("OSC Server", move |_rocket| {
-            thread::spawn(move || {
-                osc_server(lights_osc);
+        })))
+        .attach(AdHoc::on_liftoff("OSC Server", move |_rocket| Box::pin(async move {
+            tokio::spawn(async move {
+                osc_server(lights_osc).await;
             });
-        }))
-        .attach(AdHoc::on_launch("Light Pattern Output", move |_rocket| {
-            thread::spawn(move || {
-                pattern_output(lights_output, chronon_output);
+        })))
+        .attach(AdHoc::on_liftoff("Light Pattern Output", move |_rocket| Box::pin(async move {
+            tokio::spawn(async move {
+                pattern_output(lights_output, chronon_output).await;
             });
-        }))
-        .launch();
+        })))
 }
