@@ -309,6 +309,16 @@ async fn files(file: PathBuf) -> Option<NamedFile> {
     NamedFile::open(Path::new("static/").join(file)).await.ok()
 }
 
+#[get("/service-worker.js")]
+async fn service_worker() -> Option<NamedFile> {
+    NamedFile::open(Path::new("static/service-worker.js")).await.ok()
+}
+
+#[get("/manifest.json")]
+async fn manifest() -> Option<NamedFile> {
+    NamedFile::open(Path::new("static/manifest.json")).await.ok()
+}
+
 #[get("/")]
 async fn form(lights: &State<SharedLights>) -> Template {
     let context = [
@@ -612,7 +622,7 @@ fn rocket() -> _ {
     rocket::custom(Config::figment()
             .merge(("address", (if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })))
         )
-        .mount("/", routes![get_color, set_color, get_pattern, set_pattern, ws_info, files, form, form_submit])
+        .mount("/", routes![get_color, set_color, get_pattern, set_pattern, ws_info, files, service_worker, manifest, form, form_submit])
         .register("/", catchers![bad_request, unprocessable_entity, not_found])
         .manage(lights_rocket)
         .attach(Template::fairing())
