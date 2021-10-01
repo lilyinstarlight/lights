@@ -2,7 +2,6 @@
 extern crate rocket;
 
 use std::env;
-use std::panic;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -117,7 +116,7 @@ impl<'r> FromFormField<'r> for Color {
                 Ok(color)
             },
             Err(err) => {
-                Err(FormError::custom(err))?
+                Err(FormError::custom(err).into())
             }
         }
     }
@@ -199,11 +198,11 @@ impl Lights {
                 *color
             },
             Pattern::Custom(frames) => {
-                if frames.len() > 0 {
-                    frames[self.frame].color
+                if frames.is_empty() {
+                    Color { red: 0, green: 0, blue: 0 }
                 }
                 else {
-                    Color { red: 0, green: 0, blue: 0 }
+                    frames[self.frame].color
                 }
             },
         }
@@ -230,7 +229,13 @@ impl Lights {
                 *color
             },
             Pattern::Custom(frames) => {
-                if frames.len() > 0 {
+                if frames.is_empty() {
+                    self.instant = Instant::now();
+                    self.frame = 0;
+
+                    Color { red: 0, green: 0, blue: 0 }
+                }
+                else {
                     if self.frame >= frames.len() {
                         self.frame = 0;
                     }
@@ -241,12 +246,6 @@ impl Lights {
                     }
 
                     frames[self.frame].color
-                }
-                else {
-                    self.instant = Instant::now();
-                    self.frame = 0;
-
-                    Color { red: 0, green: 0, blue: 0 }
                 }
             },
         };
@@ -439,16 +438,13 @@ async fn ws_server(lights: SharedLights, chronon: Duration) {
 
                                     let removed = streams_conn.lock().await.remove(&peer);
 
-                                    match removed {
-                                        Some(mut stream) => {
-                                            match stream.close().await {
-                                                Ok(()) => {},
-                                                Err(err) => {
-                                                    eprintln!("Failed to close WebSocket connection: {}", err);
-                                                }
+                                    if let Some(mut stream) = removed {
+                                        match stream.close().await {
+                                            Ok(()) => {},
+                                            Err(err) => {
+                                                eprintln!("Failed to close WebSocket connection: {}", err);
                                             }
-                                        },
-                                        None => {}
+                                        }
                                     }
                                 });
                             },
@@ -616,9 +612,6 @@ fn rocket() -> _ {
     let lights_osc = Arc::clone(&lights);
     let lights_output = Arc::clone(&lights);
 
-    let chronon_ws = chronon.clone();
-    let chronon_output = chronon.clone();
-
     rocket::custom(Config::figment()
             .merge(("address", (if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })))
         )
@@ -628,7 +621,7 @@ fn rocket() -> _ {
         .attach(Template::fairing())
         .attach(AdHoc::on_liftoff("WebSocket Server", move |_rocket| Box::pin(async move {
             tokio::spawn(async move {
-                ws_server(lights_ws, chronon_ws).await;
+                ws_server(lights_ws, chronon).await;
             });
         })))
         .attach(AdHoc::on_liftoff("OSC Server", move |_rocket| Box::pin(async move {
@@ -638,7 +631,7 @@ fn rocket() -> _ {
         })))
         .attach(AdHoc::on_liftoff("Light Pattern Output", move |_rocket| Box::pin(async move {
             tokio::spawn(async move {
-                pattern_output(lights_output, chronon_output).await;
+                pattern_output(lights_output, chronon).await;
             });
         })))
 }
