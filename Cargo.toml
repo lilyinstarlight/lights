@@ -14,7 +14,7 @@ futures-util = "^0.3"
 rocket = { version = "0.5.0-rc.1", features = ["json"] }
 rocket_dyn_templates = { version = "0.1.0-rc.1", features = ["tera"] }
 rosc = "^0.5"
-rppal = "^0.12"
+rppal = "^0.13"
 serde_with = "^1.10"
 tokio-tungstenite = "^0.15"
 yansi = "^0.5"
