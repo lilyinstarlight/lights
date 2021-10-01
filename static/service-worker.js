@@ -35,7 +35,7 @@ self.addEventListener('install', (ev) => {
 
 self.addEventListener('fetch', (ev) => {
 	const url = new URL(ev.request.url);
-	if (url.pathname === '/' || url.pathname.startsWith('/static/')) {
+	if (staticFiles.contains(url.pathname)) {
 		ev.respondWith((async () => {
 			return fetch(ev.request)
 				.then(async (response) => {
