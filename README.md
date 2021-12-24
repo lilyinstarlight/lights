@@ -61,7 +61,7 @@ API
 
 ##### Format
 
-```
+```json
 {
   "red": 0,
   "green": 169,
@@ -82,7 +82,7 @@ API
 
 ##### Off Pattern Format
 
-```
+```json
 {
   "type": "off"
 }
@@ -91,7 +91,7 @@ API
 
 ##### Solid Pattern Format
 
-```
+```json
 {
   "type": "solid",
   "content": {
@@ -107,7 +107,7 @@ API
 
 Durations are in milliseconds
 
-```
+```json
 {
   "type": "custom",
   "content": [
@@ -217,7 +217,7 @@ The URI to connect to the WebSocket can be retrieved by making a `GET` request t
 
 ##### Format
 
-```
+```json
 {
   "red": 0,
   "green": 169,
