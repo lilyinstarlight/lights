@@ -13,6 +13,9 @@
 			body {
 				background: #111;
 				color: #ddd;
+				width: 100%;
+				padding: 0px;
+				margin: 0px;
 			}
 
 			main {
@@ -21,10 +24,42 @@
 				text-align: center;
 			}
 
+			footer {
+				font-family: Segoe UI, Aileron, helvetica, sans-serif;
+				font-weight: lighter;
+				display: table;
+				width: 100%;
+				position: absolute;
+				bottom: 0em;
+			}
+
+			footer * {
+				max-height: 3em;
+			}
+
+			footer > * {
+				height: 3em;
+				display: table-cell;
+				text-align: center;
+				vertical-align: middle;
+			}
+
 			h1, h2, h3, h4, h5, h6 {
 				font-family: Segoe UI, Aileron, helvetica, sans-serif;
 				font-weight: lighter;
 				color: #fff;
+			}
+
+
+			a {
+				color: #4bf;
+				text-decoration: none;
+				transition: all 0.5s;
+			}
+
+			a:hover {
+				color: #2ff;
+				text-shadow: 0 0 0.2em #09f;
 			}
 
 			button {
@@ -72,5 +107,8 @@
 		<main>
 			{% block content %}{% endblock content %}
 		</main>
+		<footer>
+			<p><a href="https://github.com/lilyinstarlight/lights#api" target="_blank" rel="noreferrer">API Documentation</a></p>
+		</footer>
 	</body>
 </html>
