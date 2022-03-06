@@ -10,11 +10,11 @@
 		background: #ddd;
 	}
 
-	.color-picker\:a {
+	.color-picker__control--a {
 		display: none;
 	}
 
-	.color-picker.is-static {
+	.color-picker__dialog--static {
 		display: inline-block;
 		position: static;
 		left: 0 !important;
@@ -57,7 +57,7 @@
 			document.getElementById(this.source.name + '_submit').disabled = false;
 		}
 	});
-	picker.self.classList.add('is-static');
+	picker.self.classList.add(picker.state.class + '__dialog--static');
 	picker.enter(document.getElementById(picker.source.name + '_picker'));
 
 	function num2hex(num) {
