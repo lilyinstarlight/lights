@@ -502,10 +502,10 @@ async fn osc_server(lights: SharedLights) {
     loop {
         match socket.recv_from(&mut buffer).await {
             Ok((size, _addr)) => {
-                match rosc::decoder::decode(&buffer[..size]) {
+                match rosc::decoder::decode_udp(&buffer[..size]) {
                     Ok(packet) => {
                         match packet {
-                            OscPacket::Message(msg) => {
+                            (_, OscPacket::Message(msg)) => {
                                 match msg.addr.as_ref() {
                                     "/color" => {
                                         match &msg.args[..] {
@@ -560,7 +560,7 @@ async fn osc_server(lights: SharedLights) {
                                     }
                                 }
                             },
-                            OscPacket::Bundle(bundle) => {
+                            (_, OscPacket::Bundle(bundle)) => {
                                 eprintln!("Unexpected OSC Bundle: {:?}", bundle);
                             },
                         }
