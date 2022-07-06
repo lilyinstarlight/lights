@@ -9,10 +9,10 @@ publish = false
 futures-util = "^0.3"
 #rocket = { version = "^0.5", features = ["json"] }
 #rocket_dyn_templates = { version = "^0.1", features = ["tera"] }
-rocket = { version = "0.5.0-rc.1", features = ["json"] }
-rocket_dyn_templates = { version = "0.1.0-rc.1", features = ["tera"] }
+rocket = { version = "0.5.0-rc.2", features = ["json"] }
+rocket_dyn_templates = { version = "0.1.0-rc.2", features = ["tera"] }
 rosc = "^0.7"
 rppal = "^0.13"
-serde_with = "^1.13"
+serde_with = "^1.14"
 tokio-tungstenite = "^0.17"
 yansi = "^0.5"
