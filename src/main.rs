@@ -12,19 +12,19 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use rocket::{Config, State};
 use rocket::fairing::AdHoc;
 use rocket::form::{Error as FormError, Form, FromFormField, Result as FormResult, ValueField};
 use rocket::fs::NamedFile;
 use rocket::http::Status;
 use rocket::response::Redirect;
+use rocket::{Config, State};
 
 use rocket::futures::sink::SinkExt;
 use rocket::futures::stream::{SplitSink, StreamExt};
 
-use rocket::serde::{Deserialize, Serialize};
 use rocket::serde::json::serde_json;
 use rocket::serde::json::Json;
+use rocket::serde::{Deserialize, Serialize};
 
 use rocket::tokio;
 use rocket::tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -40,12 +40,11 @@ use rppal::gpio::{Gpio, OutputPin};
 
 use serde_with::{serde_as, DurationMilliSeconds};
 
-use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::{Error as WSError, Message as WSMessage};
 use tokio_tungstenite::tungstenite::error::ProtocolError as WSProtocolError;
+use tokio_tungstenite::tungstenite::{Error as WSError, Message as WSMessage};
+use tokio_tungstenite::WebSocketStream;
 
 use yansi::Paint;
-
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -73,10 +72,10 @@ impl Display for ColorError {
         match &self.kind {
             ColorErrorKind::BadFormat => {
                 write!(f, "unknown color format")
-            },
+            }
             ColorErrorKind::ParseError => {
                 write!(f, "error parsing color format")
-            },
+            }
         }
     }
 }
@@ -86,7 +85,9 @@ impl FromStr for Color {
 
     fn from_str(color: &str) -> Result<Self, Self::Err> {
         if &color[0..1] != "#" || color.len() != 7 {
-            return Err(Self::Err { kind: ColorErrorKind::BadFormat })
+            return Err(Self::Err {
+                kind: ColorErrorKind::BadFormat,
+            });
         }
 
         let result = || -> Result<Color, ParseIntError> {
@@ -98,12 +99,10 @@ impl FromStr for Color {
         }();
 
         match result {
-            Ok(color) => {
-                Ok(color)
-            },
-            Err(_err) => {
-                Err(Self::Err { kind: ColorErrorKind::ParseError })
-            }
+            Ok(color) => Ok(color),
+            Err(_err) => Err(Self::Err {
+                kind: ColorErrorKind::ParseError,
+            }),
         }
     }
 }
@@ -112,12 +111,8 @@ impl FromStr for Color {
 impl<'r> FromFormField<'r> for Color {
     fn from_value(field: ValueField<'r>) -> FormResult<'r, Self> {
         match Color::from_str(field.value) {
-            Ok(color) => {
-                Ok(color)
-            },
-            Err(err) => {
-                Err(FormError::custom(err).into())
-            }
+            Ok(color) => Ok(color),
+            Err(err) => Err(FormError::custom(err).into()),
         }
     }
 }
@@ -138,7 +133,12 @@ struct Frame {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(crate = "rocket::serde", rename_all = "lowercase", tag = "type", content = "content")]
+#[serde(
+    crate = "rocket::serde",
+    rename_all = "lowercase",
+    tag = "type",
+    content = "content"
+)]
 enum Pattern {
     Off,
     Solid(Color),
@@ -155,9 +155,12 @@ struct Output {
 
 impl Output {
     fn set(&mut self, color: Color) -> rppal::gpio::Result<()> {
-        self.red.set_pwm_frequency(self.frequency, color.red as f64 / 255.0)?;
-        self.green.set_pwm_frequency(self.frequency, color.green as f64 / 255.0)?;
-        self.blue.set_pwm_frequency(self.frequency, color.blue as f64 / 255.0)?;
+        self.red
+            .set_pwm_frequency(self.frequency, color.red as f64 / 255.0)?;
+        self.green
+            .set_pwm_frequency(self.frequency, color.green as f64 / 255.0)?;
+        self.blue
+            .set_pwm_frequency(self.frequency, color.blue as f64 / 255.0)?;
 
         Ok(())
     }
@@ -181,30 +184,44 @@ impl Lights {
 
             frame: 0,
             instant: Instant::now(),
-            last: Color { red: 0, green: 0, blue: 0 },
+            last: Color {
+                red: 0,
+                green: 0,
+                blue: 0,
+            },
         };
 
-        lights.output.set(Color { red: 0, green: 0, blue: 0 }).expect("Lights output failure");
+        lights
+            .output
+            .set(Color {
+                red: 0,
+                green: 0,
+                blue: 0,
+            })
+            .expect("Lights output failure");
 
         lights
     }
 
     fn get(&self) -> Color {
         match &self.pattern {
-            Pattern::Off => {
-                Color { red: 0, green: 0, blue: 0 }
+            Pattern::Off => Color {
+                red: 0,
+                green: 0,
+                blue: 0,
             },
-            Pattern::Solid(color) => {
-                *color
-            },
+            Pattern::Solid(color) => *color,
             Pattern::Custom(frames) => {
                 if frames.is_empty() {
-                    Color { red: 0, green: 0, blue: 0 }
-                }
-                else {
+                    Color {
+                        red: 0,
+                        green: 0,
+                        blue: 0,
+                    }
+                } else {
                     frames[self.frame].color
                 }
-            },
+            }
         }
     }
 
@@ -222,32 +239,38 @@ impl Lights {
 
     fn tick(&mut self) {
         let next = match &self.pattern {
-            Pattern::Off => {
-                Color { red: 0, green: 0, blue: 0 }
+            Pattern::Off => Color {
+                red: 0,
+                green: 0,
+                blue: 0,
             },
-            Pattern::Solid(color) => {
-                *color
-            },
+            Pattern::Solid(color) => *color,
             Pattern::Custom(frames) => {
                 if frames.is_empty() {
                     self.instant = Instant::now();
                     self.frame = 0;
 
-                    Color { red: 0, green: 0, blue: 0 }
-                }
-                else {
+                    Color {
+                        red: 0,
+                        green: 0,
+                        blue: 0,
+                    }
+                } else {
                     if self.frame >= frames.len() {
                         self.frame = 0;
                     }
 
                     while self.instant.elapsed() >= frames[self.frame].duration {
-                        self.instant = self.instant.checked_add(frames[self.frame].duration).unwrap();
+                        self.instant = self
+                            .instant
+                            .checked_add(frames[self.frame].duration)
+                            .unwrap();
                         self.frame = (self.frame + 1) % frames.len();
                     }
 
                     frames[self.frame].color
                 }
-            },
+            }
         };
 
         if next != self.last {
@@ -299,7 +322,7 @@ async fn set_pattern(pattern: Json<Pattern>, lights: &State<SharedLights>) -> St
 async fn ws_info() -> String {
     match env::var("WS_INFO") {
         Ok(val) => val,
-        Err(_err) => String::from("")
+        Err(_err) => String::from(""),
     }
 }
 
@@ -310,21 +333,26 @@ async fn files(file: PathBuf) -> Option<NamedFile> {
 
 #[get("/service-worker.js")]
 async fn service_worker() -> Option<NamedFile> {
-    NamedFile::open(Path::new("static/service-worker.js")).await.ok()
+    NamedFile::open(Path::new("static/service-worker.js"))
+        .await
+        .ok()
 }
 
 #[get("/manifest.json")]
 async fn manifest() -> Option<NamedFile> {
-    NamedFile::open(Path::new("static/manifest.json")).await.ok()
+    NamedFile::open(Path::new("static/manifest.json"))
+        .await
+        .ok()
 }
 
 #[get("/")]
 async fn form(lights: &State<SharedLights>) -> Template {
-    let context = [
-        (String::from("color"), lights.lock().await.get().to_string()),
-    ];
+    let context = [(String::from("color"), lights.lock().await.get().to_string())];
 
-    Template::render("form", context.iter().cloned().collect::<HashMap<String, String>>())
+    Template::render(
+        "form",
+        context.iter().cloned().collect::<HashMap<String, String>>(),
+    )
 }
 
 #[post("/", data = "<color_form>")]
@@ -361,19 +389,35 @@ async fn not_found() -> Json<APIError> {
 async fn ws_server(lights: SharedLights, chronon: Duration) {
     let address = match env::var("WS_ADDRESS") {
         Ok(val) => val,
-        Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })
+        Err(_err) => String::from(if cfg!(debug_assertions) {
+            "127.0.0.1"
+        } else {
+            "0.0.0.0"
+        }),
     };
 
     let port: u16 = match env::var("WS_PORT") {
         Ok(val) => val.parse().unwrap(),
-        Err(_err) => 8001
+        Err(_err) => 8001,
     };
 
-    let listener = TcpListener::bind((address, port)).await.expect("Failed to bind TCP WebSocket address");
+    let listener = TcpListener::bind((address, port))
+        .await
+        .expect("Failed to bind TCP WebSocket address");
 
-    println!("{}{} {}", Paint::masked("🕸  "), Paint::default("WebSocket server started on").bold(), Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string()).bold().underline());
+    println!(
+        "{}{} {}",
+        Paint::masked("🕸  "),
+        Paint::default("WebSocket server started on").bold(),
+        Paint::default(String::from("ws://") + &listener.local_addr().unwrap().to_string())
+            .bold()
+            .underline()
+    );
 
-    let streams = Arc::new(Mutex::new(HashMap::<SocketAddr, SplitSink<WebSocketStream<TcpStream>, WSMessage>>::new()));
+    let streams = Arc::new(Mutex::new(HashMap::<
+        SocketAddr,
+        SplitSink<WebSocketStream<TcpStream>, WSMessage>,
+    >::new()));
 
     let mut last_color = lights.lock().await.get();
 
@@ -485,89 +529,124 @@ async fn ws_server(lights: SharedLights, chronon: Duration) {
 async fn osc_server(lights: SharedLights) {
     let address = match env::var("OSC_ADDRESS") {
         Ok(val) => val,
-        Err(_err) => String::from(if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })
+        Err(_err) => String::from(if cfg!(debug_assertions) {
+            "127.0.0.1"
+        } else {
+            "0.0.0.0"
+        }),
     };
 
     let port: u16 = match env::var("OSC_PORT") {
         Ok(val) => val.parse().unwrap(),
-        Err(_err) => 1337
+        Err(_err) => 1337,
     };
 
-    let socket = UdpSocket::bind((address, port)).await.expect("Failed to bind UDP OSC address");
+    let socket = UdpSocket::bind((address, port))
+        .await
+        .expect("Failed to bind UDP OSC address");
 
-    println!("{}{} {}", Paint::masked("🎛  "), Paint::default("OSC server started on").bold(), Paint::default(socket.local_addr().unwrap()).bold().underline());
+    println!(
+        "{}{} {}",
+        Paint::masked("🎛  "),
+        Paint::default("OSC server started on").bold(),
+        Paint::default(socket.local_addr().unwrap())
+            .bold()
+            .underline()
+    );
 
     let mut buffer = [0u8; rosc::decoder::MTU];
 
     loop {
         match socket.recv_from(&mut buffer).await {
-            Ok((size, _addr)) => {
-                match rosc::decoder::decode_udp(&buffer[..size]) {
-                    Ok(packet) => {
-                        match packet {
-                            (_, OscPacket::Message(msg)) => {
-                                match msg.addr.as_ref() {
-                                    "/color" => {
-                                        match &msg.args[..] {
-                                            [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
-                                                lights.lock().await.set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
-                                            },
-                                            [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
-                                                lights.lock().await.set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
-                                            },
-                                            [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
-                                                lights.lock().await.set(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 });
-                                            },
-                                            [OscType::Color(color)] => {
-                                                lights.lock().await.set(Color { red: color.red, green: color.green, blue: color.blue });
-                                            },
-                                            _ => {
-                                                eprintln!("Unexpected OSC /color command: {:?}", msg.args);
-                                            }
-                                        }
-                                    },
-                                    "/pattern/off" => {
-                                        match &msg.args[..] {
-                                            [] => {
-                                                lights.lock().await.set_pattern(&Pattern::Off);
-                                            },
-                                            _ => {
-                                                eprintln!("Unexpected OSC /pattern/off command: {:?}", msg.args);
-                                            }
-                                        }
-                                    },
-                                    "/pattern/solid" => {
-                                        match &msg.args[..] {
-                                            [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
-                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
-                                            },
-                                            [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
-                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
-                                            },
-                                            [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] => {
-                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: *red as u8, green: *green as u8, blue: *blue as u8 }));
-                                            },
-                                            [OscType::Color(color)] => {
-                                                lights.lock().await.set_pattern(&Pattern::Solid(Color { red: color.red, green: color.green, blue: color.blue }));
-                                            },
-                                            _ => {
-                                                eprintln!("Unexpected OSC /pattern/solid command: {:?}", msg.args);
-                                            }
-                                        }
-                                    },
-                                    _ => {
-                                        eprintln!("Unexpected OSC Message: {}: {:?}", msg.addr, msg.args);
-                                    }
-                                }
-                            },
-                            (_, OscPacket::Bundle(bundle)) => {
-                                eprintln!("Unexpected OSC Bundle: {:?}", bundle);
-                            },
+            Ok((size, _addr)) => match rosc::decoder::decode_udp(&buffer[..size]) {
+                Ok(packet) => match packet {
+                    (_, OscPacket::Message(msg)) => match msg.addr.as_ref() {
+                        "/color" => match &msg.args[..] {
+                            [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
+                                lights.lock().await.set(Color {
+                                    red: *red as u8,
+                                    green: *green as u8,
+                                    blue: *blue as u8,
+                                });
+                            }
+                            [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
+                                lights.lock().await.set(Color {
+                                    red: *red as u8,
+                                    green: *green as u8,
+                                    blue: *blue as u8,
+                                });
+                            }
+                            [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] =>
+                            {
+                                lights.lock().await.set(Color {
+                                    red: *red as u8,
+                                    green: *green as u8,
+                                    blue: *blue as u8,
+                                });
+                            }
+                            [OscType::Color(color)] => {
+                                lights.lock().await.set(Color {
+                                    red: color.red,
+                                    green: color.green,
+                                    blue: color.blue,
+                                });
+                            }
+                            _ => {
+                                eprintln!("Unexpected OSC /color command: {:?}", msg.args);
+                            }
+                        },
+                        "/pattern/off" => match &msg.args[..] {
+                            [] => {
+                                lights.lock().await.set_pattern(&Pattern::Off);
+                            }
+                            _ => {
+                                eprintln!("Unexpected OSC /pattern/off command: {:?}", msg.args);
+                            }
+                        },
+                        "/pattern/solid" => match &msg.args[..] {
+                            [OscType::Int(red), OscType::Int(green), OscType::Int(blue)] => {
+                                lights.lock().await.set_pattern(&Pattern::Solid(Color {
+                                    red: *red as u8,
+                                    green: *green as u8,
+                                    blue: *blue as u8,
+                                }));
+                            }
+                            [OscType::Float(red), OscType::Float(green), OscType::Float(blue)] => {
+                                lights.lock().await.set_pattern(&Pattern::Solid(Color {
+                                    red: *red as u8,
+                                    green: *green as u8,
+                                    blue: *blue as u8,
+                                }));
+                            }
+                            [OscType::Double(red), OscType::Double(green), OscType::Double(blue)] =>
+                            {
+                                lights.lock().await.set_pattern(&Pattern::Solid(Color {
+                                    red: *red as u8,
+                                    green: *green as u8,
+                                    blue: *blue as u8,
+                                }));
+                            }
+                            [OscType::Color(color)] => {
+                                lights.lock().await.set_pattern(&Pattern::Solid(Color {
+                                    red: color.red,
+                                    green: color.green,
+                                    blue: color.blue,
+                                }));
+                            }
+                            _ => {
+                                eprintln!("Unexpected OSC /pattern/solid command: {:?}", msg.args);
+                            }
+                        },
+                        _ => {
+                            eprintln!("Unexpected OSC Message: {}: {:?}", msg.addr, msg.args);
                         }
                     },
-                    Err(err) => {
-                        eprintln!("Error decoding OSC packet: {:?}", err);
+                    (_, OscPacket::Bundle(bundle)) => {
+                        eprintln!("Unexpected OSC Bundle: {:?}", bundle);
                     }
+                },
+                Err(err) => {
+                    eprintln!("Error decoding OSC packet: {:?}", err);
                 }
             },
             Err(err) => {
@@ -578,7 +657,11 @@ async fn osc_server(lights: SharedLights) {
 }
 
 async fn pattern_output(lights: SharedLights, chronon: Duration) {
-    println!("{}{}", Paint::masked("💡 "), Paint::default("Light pattern output started").bold());
+    println!(
+        "{}{}",
+        Paint::masked("💡 "),
+        Paint::default("Light pattern output started").bold()
+    );
 
     let mut interval = time::interval(chronon);
 
@@ -590,7 +673,11 @@ async fn pattern_output(lights: SharedLights, chronon: Duration) {
 
 #[launch]
 fn rocket() -> _ {
-    let initial = Color { red: 242, green: 155, blue: 212 };
+    let initial = Color {
+        red: 242,
+        green: 155,
+        blue: 212,
+    };
 
     let chronon = Duration::from_millis(10);
 
@@ -612,26 +699,51 @@ fn rocket() -> _ {
     let lights_osc = Arc::clone(&lights);
     let lights_output = Arc::clone(&lights);
 
-    rocket::custom(Config::figment()
-            .merge(("address", (if cfg!(debug_assertions) { "127.0.0.1" } else { "0.0.0.0" })))
-        )
-        .mount("/", routes![get_color, set_color, get_pattern, set_pattern, ws_info, files, service_worker, manifest, form, form_submit])
-        .register("/", catchers![bad_request, unprocessable_entity, not_found])
-        .manage(lights_rocket)
-        .attach(Template::fairing())
-        .attach(AdHoc::on_liftoff("WebSocket Server", move |_rocket| Box::pin(async move {
+    rocket::custom(Config::figment().merge((
+        "address",
+        (if cfg!(debug_assertions) {
+            "127.0.0.1"
+        } else {
+            "0.0.0.0"
+        }),
+    )))
+    .mount(
+        "/",
+        routes![
+            get_color,
+            set_color,
+            get_pattern,
+            set_pattern,
+            ws_info,
+            files,
+            service_worker,
+            manifest,
+            form,
+            form_submit
+        ],
+    )
+    .register("/", catchers![bad_request, unprocessable_entity, not_found])
+    .manage(lights_rocket)
+    .attach(Template::fairing())
+    .attach(AdHoc::on_liftoff("WebSocket Server", move |_rocket| {
+        Box::pin(async move {
             tokio::spawn(async move {
                 ws_server(lights_ws, chronon).await;
             });
-        })))
-        .attach(AdHoc::on_liftoff("OSC Server", move |_rocket| Box::pin(async move {
+        })
+    }))
+    .attach(AdHoc::on_liftoff("OSC Server", move |_rocket| {
+        Box::pin(async move {
             tokio::spawn(async move {
                 osc_server(lights_osc).await;
             });
-        })))
-        .attach(AdHoc::on_liftoff("Light Pattern Output", move |_rocket| Box::pin(async move {
+        })
+    }))
+    .attach(AdHoc::on_liftoff("Light Pattern Output", move |_rocket| {
+        Box::pin(async move {
             tokio::spawn(async move {
                 pattern_output(lights_output, chronon).await;
             });
-        })))
+        })
+    }))
 }
