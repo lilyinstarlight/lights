@@ -14,5 +14,5 @@ rocket_dyn_templates = { version = "0.1.0-rc.2", features = ["tera"] }
 rosc = "^0.9"
 rppal = "^0.14"
 serde_with = "^2.1"
-tokio-tungstenite = "^0.17"
+tokio-tungstenite = "^0.18"
 yansi = "^0.5"
