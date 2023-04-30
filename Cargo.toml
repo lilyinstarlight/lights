@@ -3,16 +3,20 @@ name = "fooster_lights"
 version = "0.2.0"
 authors = ["Lily Foster <lily@lily.flowers>"]
 edition = "2021"
+description = "Controlling an RGB LED light strip over the network via a Raspberry Pi"
+readme = "README.md"
+repository = "https://github.com/lilyinstarlight/lights"
+license = "MIT"
 publish = false
 
 [dependencies]
 futures-util = "^0.3"
 #rocket = { version = "^0.5", features = ["json"] }
 #rocket_dyn_templates = { version = "^0.1", features = ["tera"] }
-rocket = { version = "0.5.0-rc.2", features = ["json"] }
-rocket_dyn_templates = { version = "0.1.0-rc.2", features = ["tera"] }
-rosc = "^0.9"
+rocket = { version = "0.5.0-rc.3", features = ["json"] }
+rocket_dyn_templates = { version = "0.1.0-rc.3", features = ["tera"] }
+rosc = "^0.10"
 rppal = "^0.14"
-serde_with = "^2.2"
+serde_with = "^2.3"
 tokio-tungstenite = "^0.18"
 yansi = "^0.5"
